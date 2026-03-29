@@ -20,17 +20,24 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Register fonts once ───────────────────────────────────────────────────────
-_APP_DIR = os.path.dirname(os.path.abspath(__file__))
-_FONTS = [
-    ("RAQN", "DejaVuSans.ttf"),
-    ("RAQB", "DejaVuSans-Bold.ttf"),
-    ("RAQI", "DejaVuSans-Oblique.ttf"),
-]
+# Find font directory — works both locally and on Streamlit Cloud
+def _find_font(fname):
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), fname),
+        os.path.join(os.getcwd(), fname),
+        fname,
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
+
 _registered = pdfmetrics.getRegisteredFontNames()
-for _fn, _ff in _FONTS:
-    _fp = os.path.join(_APP_DIR, _ff)
-    if _fn not in _registered and os.path.exists(_fp):
-        pdfmetrics.registerFont(TTFont(_fn, _fp))
+for _fn, _ff in [("RAQN","DejaVuSans.ttf"),("RAQB","DejaVuSans-Bold.ttf"),("RAQI","DejaVuSans-Oblique.ttf")]:
+    if _fn not in _registered:
+        _fp = _find_font(_ff)
+        if _fp:
+            pdfmetrics.registerFont(TTFont(_fn, _fp))
 
 _use_dv = "RAQN" in pdfmetrics.getRegisteredFontNames()
 FN = "RAQN" if _use_dv else "Helvetica"
@@ -43,7 +50,10 @@ def load_db():
     try:
         import openpyxl
         wb = openpyxl.load_workbook(
-            os.path.join(_APP_DIR, "database.xlsx"), data_only=True)
+            next((p for p in [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "database.xlsx"),
+            os.path.join(os.getcwd(), "database.xlsx"),
+            "database.xlsx"] if os.path.exists(p)), "database.xlsx"), data_only=True)
         airports = {}
         for row in wb['AIRPORT_DB'].iter_rows(min_row=2, values_only=True):
             if row[0]:
