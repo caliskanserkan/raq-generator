@@ -14,13 +14,16 @@ st.markdown("""
 <style>
 /* Streamlit toolbar ve manage app butonlarını gizle */
 #MainMenu { visibility: hidden; }
-header { visibility: hidden; }
 footer { visibility: hidden; }
-.stDeployButton { display: none; }
-[data-testid="stToolbar"] { display: none; }
-[data-testid="manage-app-button"] { display: none; }
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="manage-app-button"] { display: none !important; }
+[data-testid="stStatusWidget"] { display: none !important; }
 .viewerBadge_container__1QSob { display: none; }
-.stAppDeployButton { display: none; }
+.stDeployButton { display: none !important; }
+.stAppDeployButton { display: none !important; }
+iframe[title="manage-app-button"] { display: none !important; }
+/* Header arka planı şeffaf, içerik gizli ama sidebar butonu korunuyor */
+section[data-testid="stSidebar"] { display: block !important; }
 .info-card { background-color:#2C3E50; padding:14px 20px; border-radius:8px; margin:10px 0; }
 .info-card h3 { color:white; margin:0 0 4px 0; font-size:15px; }
 .info-card p  { color:#AEB6BF; margin:0; font-size:12px; }
