@@ -108,6 +108,29 @@ def generate_pdf(airport, risk, flight_info):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    import os
+
+    # Register DejaVu fonts for full Turkish/Unicode support
+    font_paths = [
+        ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',         'DejaVu'),
+        ('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',    'DejaVu-Bold'),
+        ('/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf', 'DejaVu-Oblique'),
+    ]
+    for path, name in font_paths:
+        if os.path.exists(path) and name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(name, path))
+
+    # Use DejaVu if available, else fallback to Helvetica
+    def F(style=''):
+        registered = pdfmetrics.getRegisteredFontNames()
+        if style == 'Bold'    and 'DejaVu-Bold'    in registered: return 'DejaVu-Bold'
+        if style == 'Oblique' and 'DejaVu-Oblique' in registered: return 'DejaVu-Oblique'
+        if 'DejaVu' in registered: return 'DejaVu'
+        if style == 'Bold':    return F('Bold')
+        if style == 'Oblique': return F('Oblique')
+        return 'Helvetica' 
 
     RED   = colors.HexColor("#C0392B")
     DARK  = colors.HexColor("#1A252F")
@@ -170,12 +193,12 @@ def generate_pdf(airport, risk, flight_info):
 
     def sec(yt, text, h=17):
         rect(ML, yt, W, h, fill=MID, stroke=DARK, sw=1)
-        txt(f"  {text}", ML+4, yt-h+4, 'Helvetica-Bold', 9, WHITE)
+        txt(f"  {text}", ML+4, yt-h+4, F('Bold'), 9, WHITE)
         return yt - h
 
     def subhdr(yt, text, h=13):
         rect(ML, yt, W, h, fill=STEEL, stroke=STEEL)
-        txt(f"  {text}", ML+6, yt-h+3, 'Helvetica-Bold', 8, WHITE)
+        txt(f"  {text}", ML+6, yt-h+3, F('Bold'), 8, WHITE)
         return yt - h
 
     def textblock(yt, text, bg=INPB, pad=8):
@@ -183,14 +206,14 @@ def generate_pdf(airport, risk, flight_info):
         parts = [p.strip() for p in clean.split('•') if p.strip()]
         lines = []
         for p in parts:
-            lines.extend(wrap(f"• {p}", 'Helvetica', 8.5, W-pad*2-4))
+            lines.extend(wrap(f"• {p}", F(), 8.5, W-pad*2-4))
         if not parts:
-            lines = wrap(clean, 'Helvetica', 8.5, W-pad*2-4)
+            lines = wrap(clean, F(), 8.5, W-pad*2-4)
         h = len(lines)*11 + pad*2
         rect(ML, yt, W, h, fill=bg, stroke=BORD)
         ty = yt - pad - 8
         for line in lines:
-            txt(line, ML+pad+2, ty, 'Helvetica', 8.5, DARK)
+            txt(line, ML+pad+2, ty, F(), 8.5, DARK)
             ty -= 11
         return yt - h
 
@@ -202,14 +225,14 @@ def generate_pdf(airport, risk, flight_info):
                       checked=False, buttonStyle='check',
                       borderColor=DARK, fillColor=WHITE,
                       textColor=RED, forceBorder=True)
-        txt(label, ML+6+sz+6, yt-h/2-3.5, 'Helvetica', 9, DARK)
+        txt(label, ML+6+sz+6, yt-h/2-3.5, F(), 9, DARK)
         return yt - h
 
     def col_hdrs(yt, cols, h=15):
         x = ML
         for label, w in cols:
             rect(x, yt, w, h, fill=STEEL, stroke=BORD)
-            txt(label, x, yt-h+4, 'Helvetica-Bold', 8.5, WHITE, 'center', w)
+            txt(label, x, yt-h+4, F('Bold'), 8.5, WHITE, 'center', w)
             x += w
         return yt - h
 
@@ -226,14 +249,14 @@ def generate_pdf(airport, risk, flight_info):
     rect(ML,          y, W*0.72, hh, fill=RED,  stroke=DARK, sw=1)
     rect(ML + W*0.72, y, W*0.28, hh, fill=MID,  stroke=DARK, sw=1)
     txt("REC HAVACILIK  ✈  YOL VE MEYDAN YETERLİLİK EĞİTİM FORMU",
-        ML+8, y-hh+8, 'Helvetica-Bold', 10, WHITE)
+        ML+8, y-hh+8, F('Bold'), 10, WHITE)
     txt("FOP-FRM02 | Rev 0 | 2023-10-31",
-        ML+W*0.72+4, y-hh+8, 'Helvetica-Bold', 7, WHITE)
+        ML+W*0.72+4, y-hh+8, F('Bold'), 7, WHITE)
     y -= hh
     sh = 13
     rect(ML, y, W, sh, fill=LIGHT, stroke=BORD)
     txt("ROUTE AND AERODROME QUALIFICATION TRAINING FORM",
-        ML, y-sh+3, 'Helvetica-Oblique', 8, STEEL, 'center', W)
+        ML, y-sh+3, F('Oblique'), 8, STEEL, 'center', W)
     y -= sh + 3
 
     # ── Flight Details ────────────────────────────────────────────────────────
@@ -241,10 +264,10 @@ def generate_pdf(airport, risk, flight_info):
     cw = [W*0.18, W*0.15, W*0.335, W*0.335]
     y = col_hdrs(y, [("Date",cw[0]),("A/C Type",cw[1]),("PIC",cw[2]),("SIC",cw[3])])
     y = col_data(y, [
-        (flight_info.get("date",""),    cw[0], 'Helvetica-Bold', 9, DARK, 'center'),
-        (flight_info.get("ac_type",""), cw[1], 'Helvetica-Bold', 9, DARK, 'center'),
-        (flight_info.get("pic",""),     cw[2], 'Helvetica-Bold', 9, DARK, 'center'),
-        (flight_info.get("sic",""),     cw[3], 'Helvetica-Bold', 9, DARK, 'center'),
+        (flight_info.get("date",""),    cw[0], F('Bold'), 9, DARK, 'center'),
+        (flight_info.get("ac_type",""), cw[1], F('Bold'), 9, DARK, 'center'),
+        (flight_info.get("pic",""),     cw[2], F('Bold'), 9, DARK, 'center'),
+        (flight_info.get("sic",""),     cw[3], F('Bold'), 9, DARK, 'center'),
     ])
     y -= 3
 
@@ -254,9 +277,9 @@ def generate_pdf(airport, risk, flight_info):
     y = col_hdrs(y, [("Airport Name",cw2[0]),("ICAO",cw2[1]),("Category",cw2[2])])
     ah = 22; x = ML
     for text, w, font, size, color in [
-        (airport.get("name",""),     cw2[0], 'Helvetica-Bold', 9,  DARK),
-        (airport.get("icao",""),     cw2[1], 'Helvetica-Bold', 9,  DARK),
-        (airport.get("category",""), cw2[2], 'Helvetica-Bold', 13, RED),
+        (airport.get("name",""),     cw2[0], F('Bold'), 9,  DARK),
+        (airport.get("icao",""),     cw2[1], F('Bold'), 9,  DARK),
+        (airport.get("category",""), cw2[2], F('Bold'), 13, RED),
     ]:
         rect(x, y, w, ah, fill=LIGHT, stroke=BORD)
         txt(text, x, y-ah+5, font, size, color, 'center', w)
@@ -335,10 +358,10 @@ def generate_pdf(airport, risk, flight_info):
             "for the flight in accordance with AMC1 ORO.FC.105 b(2);c and OM PART C.")
     ch = 24
     rect(ML, y, W, ch, fill=LIGHT, stroke=BORD)
-    lines = wrap(cert, 'Helvetica-Oblique', 8, W-16)
+    lines = wrap(cert, F('Oblique'), 8, W-16)
     ty = y - 6
     for line in lines:
-        txt(line, ML+8, ty, 'Helvetica-Oblique', 8, STEEL)
+        txt(line, ML+8, ty, F('Oblique'), 8, STEEL)
         ty -= 10
     y -= ch
 
@@ -346,9 +369,9 @@ def generate_pdf(airport, risk, flight_info):
     cw3 = [W*0.22, W*0.55, W*0.23]
     x = ML
     for text, w, font, size, color, align in [
-        ("Completed by:", cw3[0], 'Helvetica-Bold', 9, DARK,  'center'),
-        (flight_info.get("pic",""), cw3[1], 'Helvetica-Bold', 9, DARK, 'center'),
-        (today,          cw3[2], 'Helvetica',       8, STEEL, 'right'),
+        ("Completed by:", cw3[0], F('Bold'), 9, DARK,  'center'),
+        (flight_info.get("pic",""), cw3[1], F('Bold'), 9, DARK, 'center'),
+        (today,          cw3[2], F(),       8, STEEL, 'right'),
     ]:
         rect(x, y, w, 20, fill=LIGHT, stroke=BORD)
         txt(text, x, y-15, font, size, color, align, w)
