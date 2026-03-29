@@ -7,12 +7,13 @@ from reportlab.pdfbase.ttfonts import TTFont
 st.set_page_config(
     page_title="RAQ Form Generator - REC Havacilik",
     page_icon="✈",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="expanded"
 )
 
 st.markdown("""
 <style>
-/* Streamlit toolbar ve manage app butonlarını gizle */
+/* Streamlit toolbar gizle - sidebar korunuyor */
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
 [data-testid="stToolbar"] { display: none !important; }
@@ -21,9 +22,6 @@ footer { visibility: hidden; }
 .viewerBadge_container__1QSob { display: none; }
 .stDeployButton { display: none !important; }
 .stAppDeployButton { display: none !important; }
-iframe[title="manage-app-button"] { display: none !important; }
-/* Header arka planı şeffaf, içerik gizli ama sidebar butonu korunuyor */
-section[data-testid="stSidebar"] { display: block !important; }
 .info-card { background-color:#2C3E50; padding:14px 20px; border-radius:8px; margin:10px 0; }
 .info-card h3 { color:white; margin:0 0 4px 0; font-size:15px; }
 .info-card p  { color:#AEB6BF; margin:0; font-size:12px; }
