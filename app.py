@@ -1,5 +1,6 @@
 import streamlit as st
 import datetime, io, os, json
+from czib_check import check_czib, get_country_from_icao
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -131,6 +132,7 @@ def update_airport(icao, fields):
 
 # ── PDF Generator ─────────────────────────────────────────────────────────────
 def generate_pdf(airport, risk, fi):
+    czib_text = fi.get('czib', '')
     from reportlab.pdfgen import canvas as C
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -260,6 +262,13 @@ def generate_pdf(airport, risk, fi):
     rt=(f"RISK LEVEL: {risk['risk_level']}   |   CAT: {airport.get('category','')}   |   {risk['ops_approval']}\nMITIGATION: {risk['mitigation']}" if risk else "Risk verisi bulunamadi.")
     y=tblk(y,rt,bg=RISKB,pad=8); y-=3
 
+    # CZIB Warning (bold red, only if active)
+    if czib_text:
+        cz_h = 22
+        bx(ML,y,W,cz_h,fill=colors.HexColor("#FADBD8"),stroke=colors.HexColor("#C0392B"),sw=1.5)
+        tx(f"  ⚠  {czib_text}",ML+6,y-cz_h+6,FB,9,colors.HexColor("#C0392B"))
+        y -= cz_h + 3
+
     cert="I hereby certify that route and aerodrome familiarization was completed for the flight in accordance with AMC1 ORO.FC.105 b(2);c and OM PART C."
     ch=24; bx(ML,y,W,ch,fill=LIGHT,stroke=BORD)
     lns=wl(cert,FI,8,W-16); ty=y-6
@@ -334,7 +343,11 @@ if st.button("📄  RAQ FORM PDF OLUSTUR", use_container_width=True, type="prima
     else:
         with st.spinner("PDF olusturuluyor..."):
             try:
-                pdf=generate_pdf(airports[icao],risks.get(icao),{"date":date.strftime("%Y-%m-%d"),"ac_type":ac,"pic":pic,"sic":sic})
+                # CZIB check
+                czib_hit, czib_text = check_czib(icao)
+                if czib_hit:
+                    st.warning(f"⚠ {czib_text}")
+                pdf=generate_pdf(airports[icao],risks.get(icao),{"date":date.strftime("%Y-%m-%d"),"ac_type":ac,"pic":pic,"sic":sic,"czib":czib_text})
                 fname=f"RAQ_{icao}_{date.strftime('%Y-%m-%d')}.pdf"
                 st.success("✔ PDF hazir!")
                 st.download_button("⬇  PDF Indir",pdf,fname,"application/pdf",use_container_width=True)
