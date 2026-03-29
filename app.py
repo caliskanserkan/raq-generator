@@ -12,6 +12,15 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+/* Streamlit toolbar ve manage app butonlarını gizle */
+#MainMenu { visibility: hidden; }
+header { visibility: hidden; }
+footer { visibility: hidden; }
+.stDeployButton { display: none; }
+[data-testid="stToolbar"] { display: none; }
+[data-testid="manage-app-button"] { display: none; }
+.viewerBadge_container__1QSob { display: none; }
+.stAppDeployButton { display: none; }
 .info-card { background-color:#2C3E50; padding:14px 20px; border-radius:8px; margin:10px 0; }
 .info-card h3 { color:white; margin:0 0 4px 0; font-size:15px; }
 .info-card p  { color:#AEB6BF; margin:0; font-size:12px; }
