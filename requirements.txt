@@ -1,4 +1,6 @@
 streamlit
 reportlab
 openpyxl
-pandas
+gspread
+google-auth
+google-auth-oauthlib
