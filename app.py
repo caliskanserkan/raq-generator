@@ -14,42 +14,26 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── PDF Generator ──────────────────────────────────────────────────────────────
-def generate_pdf(fi):
+# ── PDF Generator (çoklu sayfa) ──────────────────────────────────────────────
+def generate_multi_pdf(airports, risks, fi):
     buf = io.BytesIO()
     cv = C.Canvas(buf, pagesize=A4)
 
-    # Departure sayfası
+    def add_page(title, content):
+        cv.showPage()
+        cv.setFont("Helvetica-Bold", 14)
+        cv.drawString(100, 800, title)
+        cv.setFont("Helvetica", 12)
+        cv.drawString(100, 770, content)
+
     if fi.get("dep", "").strip():
-        cv.showPage()
-        cv.setFont("Helvetica-Bold", 14)
-        cv.drawString(100, 800, "Departure")
-        cv.setFont("Helvetica", 12)
-        cv.drawString(100, 770, fi["dep"])
-
-    # Departure Alternate sayfası
+        add_page("Departure", fi["dep"])
     if fi.get("dep_alt", "").strip():
-        cv.showPage()
-        cv.setFont("Helvetica-Bold", 14)
-        cv.drawString(100, 800, "Departure Alternate")
-        cv.setFont("Helvetica", 12)
-        cv.drawString(100, 770, fi["dep_alt"])
-
-    # Arrival sayfası
+        add_page("Departure Alternate", fi["dep_alt"])
     if fi.get("arr", "").strip():
-        cv.showPage()
-        cv.setFont("Helvetica-Bold", 14)
-        cv.drawString(100, 800, "Arrival")
-        cv.setFont("Helvetica", 12)
-        cv.drawString(100, 770, fi["arr"])
-
-    # Arrival Alternate sayfası
+        add_page("Arrival", fi["arr"])
     if fi.get("arr_alt", "").strip():
-        cv.showPage()
-        cv.setFont("Helvetica-Bold", 14)
-        cv.drawString(100, 800, "Arrival Alternate")
-        cv.setFont("Helvetica", 12)
-        cv.drawString(100, 770, fi["arr_alt"])
+        add_page("Arrival Alternate", fi["arr_alt"])
 
     cv.save()
     buf.seek(0)
@@ -80,17 +64,19 @@ if st.button("📄  RAQ FORM PDF OLUSTUR", use_container_width=True, type="prima
         with st.spinner("PDF olusturuluyor..."):
             try:
                 czib_hit, czib_text = check_czib("TEST")
-                pdf = generate_pdf({
-                    "date": date.strftime("%Y-%m-%d"),
-                    "ac_type": ac,
-                    "pic": pic,
-                    "sic": sic,
-                    "czib": czib_text,
-                    "dep": dep,
-                    "dep_alt": dep_alt,
-                    "arr": arr,
-                    "arr_alt": arr_alt
-                })
+                pdf = generate_multi_pdf(
+                    {}, {}, {
+                        "date": date.strftime("%Y-%m-%d"),
+                        "ac_type": ac,
+                        "pic": pic,
+                        "sic": sic,
+                        "czib": czib_text,
+                        "dep": dep,
+                        "dep_alt": dep_alt,
+                        "arr": arr,
+                        "arr_alt": arr_alt
+                    }
+                )
                 fname = f"RAQ_{date.strftime('%Y-%m-%d')}.pdf"
                 st.success("✔ PDF hazır!")
                 st.download_button("⬇  PDF İndir", pdf, fname, "application/pdf", use_container_width=True)
