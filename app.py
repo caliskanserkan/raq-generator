@@ -34,3 +34,11 @@ FI = "RAQI" if _dv else "Helvetica-Oblique"
 
 # ── PDF Generator ──────────────────────────────────────────────────────────────
 def generate_pdf(airport, risk, fi):
+    # ... burada RAQ formunu çizme mantığı vardı ...
+    # (senin bana ilk gönderdiğin uzun fonksiyon)
+    pass
+
+# ── UI ─────────────────────────────────────────────────────────────────────────
+airports, risks = load_db()
+
+# ... burada admin paneli, ICAO inputu, uçuş bilgileri ve PDF oluşturma butonu vardı ...
