@@ -27,6 +27,8 @@ footer { visibility: hidden; }
 .info-card p  { color:#AEB6BF; margin:0; font-size:12px; }
 .risk-box { background-color:#FADBD8; border:2px solid #C0392B; border-radius:6px; padding:10px 14px; margin:6px 0; }
 .risk-box p { color:#C0392B; font-weight:bold; margin:0; font-size:12px; }
+.airport-label { background-color:#1A252F; color:white; padding:6px 12px; border-radius:6px;
+                 font-size:13px; font-weight:bold; margin-bottom:4px; display:inline-block; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -50,8 +52,10 @@ FN = "RAQN" if _dv else "Helvetica"
 FB = "RAQB" if _dv else "Helvetica-Bold"
 FI = "RAQI" if _dv else "Helvetica-Oblique"
 
-# ── PDF Generator ──────────────────────────────────────────────────────────────
-def generate_pdf(airport, risk, fi):
+
+# ── Single Page PDF Generator ──────────────────────────────────────────────────
+def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
+    """Draws one RAQ form page onto the given canvas (cv). Does NOT save."""
     czib_text = fi.get("czib", "")
     from reportlab.pdfgen import canvas as C
     from reportlab.lib.pagesizes import A4
@@ -65,8 +69,7 @@ def generate_pdf(airport, risk, fi):
     BORD  = colors.HexColor("#AEB6BF"); W_    = colors.white
 
     PW, PH = A4; ML = 15 * mm; W = PW - 2 * ML
-    buf = io.BytesIO(); cv = C.Canvas(buf, pagesize=A4)
-    cv.setTitle(f"RAQ-{airport.get('icao','')}-{fi.get('date','')}"); frm = cv.acroForm; y = PH - 12 * mm
+    y = PH - 12 * mm
 
     def bx(x, yt, w2, h, fill=LIGHT, stroke=BORD, sw=0.5):
         cv.setLineWidth(sw); cv.setFillColor(fill); cv.setStrokeColor(stroke)
@@ -125,9 +128,13 @@ def generate_pdf(airport, risk, fi):
         for text, w2, font, size, color, align in cols: bx(x, yt, w2, h, fill=INPB, stroke=BORD); tx(text, x, yt - h + 5, font, size, color, align, w2); x += w2
         return yt - h
 
+    # Header
     hh = 26
     bx(ML, y, W * .72, hh, fill=RED, stroke=DARK, sw=1); bx(ML + W * .72, y, W * .28, hh, fill=MID, stroke=DARK, sw=1)
-    tx("REC HAVACILIK  ✈  YOL VE MEYDAN YETERLİLİK EĞİTİM FORMU", ML + 8, y - hh + 8, FB, 10, W_)
+    header_title = f"REC HAVACILIK  ✈  YOL VE MEYDAN YETERLİLİK EĞİTİM FORMU"
+    if page_label:
+        header_title += f"  [{page_label}]"
+    tx(header_title, ML + 8, y - hh + 8, FB, 9.5, W_)
     tx("FOP-FRM02 | Rev 0 | 2023-10-31", ML + W * .72 + 4, y - hh + 8, FB, 7, W_); y -= hh
     bx(ML, y, W, 13, fill=LIGHT, stroke=BORD)
     tx("ROUTE AND AERODROME QUALIFICATION TRAINING FORM", ML, y - 10, FI, 8, STEEL, "center", W); y -= 16
@@ -154,30 +161,31 @@ def generate_pdf(airport, risk, fi):
     hw = W / 2; y = chdrs(y, [("Self Briefing", hw), ("Local Authority", hw)])
     fh = 20; bx(ML, y, hw, fh, fill=LIGHT, stroke=BORD); bx(ML + hw, y, hw, fh, fill=LIGHT, stroke=BORD)
     csz = 12; cby = y - fh + (fh - csz) / 2
-    frm.checkbox(name="fam_self",  tooltip="Self Briefing",    x=ML + hw / 2 - csz / 2,      y=cby, size=csz, checked=False, buttonStyle="check", borderColor=DARK, fillColor=W_, textColor=RED, forceBorder=True)
-    frm.checkbox(name="fam_local", tooltip="Local Authority", x=ML + hw + hw / 2 - csz / 2, y=cby, size=csz, checked=False, buttonStyle="check", borderColor=DARK, fillColor=W_, textColor=RED, forceBorder=True)
+    icao_key = airport.get("icao", "X")
+    frm.checkbox(name=f"fam_self_{icao_key}",  tooltip="Self Briefing",    x=ML + hw / 2 - csz / 2,      y=cby, size=csz, checked=False, buttonStyle="check", borderColor=DARK, fillColor=W_, textColor=RED, forceBorder=True)
+    frm.checkbox(name=f"fam_local_{icao_key}", tooltip="Local Authority", x=ML + hw + hw / 2 - csz / 2, y=cby, size=csz, checked=False, buttonStyle="check", borderColor=DARK, fillColor=W_, textColor=RED, forceBorder=True)
     y -= fh + 3
 
     y = shdr(y, "FOLLOWING ITEMS WERE BRIEFED AND FAMILIARIZED FOR THE ROUTE FLOWN")
     for i, (nm, lbl) in enumerate([
-        ("cb_terrain",    "Terrain and Safe Altitudes"),
-        ("cb_comms",      "Communication and ATC Facilities"),
-        ("cb_sar",        "Search & Rescue Procedures"),
-        ("cb_layout",     "Airport Layout"),
-        ("cb_approach",   "Approach Aids"),
-        ("cb_instrument", "Instrument Approach and Hold Procedures"),
-        ("cb_minima",     "Operating Minima"),
+        (f"cb_terrain_{icao_key}",    "Terrain and Safe Altitudes"),
+        (f"cb_comms_{icao_key}",      "Communication and ATC Facilities"),
+        (f"cb_sar_{icao_key}",        "Search & Rescue Procedures"),
+        (f"cb_layout_{icao_key}",     "Airport Layout"),
+        (f"cb_approach_{icao_key}",   "Approach Aids"),
+        (f"cb_instrument_{icao_key}", "Instrument Approach and Hold Procedures"),
+        (f"cb_minima_{icao_key}",     "Operating Minima"),
     ]):
         y = cbrow(y, nm, lbl, bg=LIGHT if i % 2 == 0 else ALT)
     y -= 3
 
     y = shdr(y, "SPECIAL ITEMS BRIEFED DUE TO AERODROME CATEGORY")
     for i, (nm, lbl) in enumerate([
-        ("sp_1", "(1) Non-standard approach aids or approach patterns"),
-        ("sp_2", "(2) Unusual local weather conditions"),
-        ("sp_3", "(3) Unusual characteristics or performance limitations"),
-        ("sp_4", "(4) Other relevant considerations: obstructions, physical layout, lighting etc."),
-        ("sp_5", "(5) Category C aerodromes: additional considerations for approach/landing/take-off."),
+        (f"sp_1_{icao_key}", "(1) Non-standard approach aids or approach patterns"),
+        (f"sp_2_{icao_key}", "(2) Unusual local weather conditions"),
+        (f"sp_3_{icao_key}", "(3) Unusual characteristics or performance limitations"),
+        (f"sp_4_{icao_key}", "(4) Other relevant considerations: obstructions, physical layout, lighting etc."),
+        (f"sp_5_{icao_key}", "(5) Category C aerodromes: additional considerations for approach/landing/take-off."),
     ]):
         y = cbrow(y, nm, lbl, bg=LIGHT if i % 2 == 0 else ALT)
     y -= 3
@@ -200,9 +208,10 @@ def generate_pdf(airport, risk, fi):
     y = tblk(y, rt, bg=RISKB, pad=8); y -= 3
 
     if czib_text:
+        from reportlab.lib import colors as cl
         cz_h = 22
-        bx(ML, y, W, cz_h, fill=colors.HexColor("#FADBD8"), stroke=colors.HexColor("#C0392B"), sw=1.5)
-        tx(f"  ⚠  {czib_text}", ML + 6, y - cz_h + 6, FB, 9, colors.HexColor("#C0392B"))
+        bx(ML, y, W, cz_h, fill=cl.HexColor("#FADBD8"), stroke=cl.HexColor("#C0392B"), sw=1.5)
+        tx(f"  ⚠  {czib_text}", ML + 6, y - cz_h + 6, FB, 9, cl.HexColor("#C0392B"))
         y -= cz_h + 3
 
     cert = "I hereby certify that route and aerodrome familiarization was completed for the flight in accordance with AMC1 ORO.FC.105 b(2);c and OM PART C."
@@ -219,7 +228,37 @@ def generate_pdf(airport, risk, fi):
     ]:
         bx(x, y, w2, 20, fill=LIGHT, stroke=BORD); tx(text, x, y - 15, font, size, color, align, w2); x += w2
 
-    cv.save(); buf.seek(0); return buf.getvalue()
+
+# ── Booklet PDF Generator ──────────────────────────────────────────────────────
+def generate_booklet_pdf(airport_list, airports_db, risks_db, fi):
+    """Generates a multi-page booklet PDF for all provided airports."""
+    from reportlab.pdfgen import canvas as C
+    from reportlab.lib.pagesizes import A4
+
+    buf = io.BytesIO()
+    cv = C.Canvas(buf, pagesize=A4)
+    cv.setTitle(f"RAQ-BOOKLET-{fi.get('date', '')}")
+    frm = cv.acroForm
+
+    for idx, (label, icao) in enumerate(airport_list):
+        airport = airports_db[icao]
+        risk = risks_db.get(icao)
+
+        # Get CZIB for this airport
+        try:
+            czib_hit, czib_text = check_czib(icao)
+        except Exception:
+            czib_text = ""
+
+        fi_page = {**fi, "czib": czib_text}
+        generate_pdf_page(cv, frm, airport, risk, fi_page, page_label=label)
+
+        # Add page (showPage) after each airport except the logic handles it
+        cv.showPage()
+
+    cv.save()
+    buf.seek(0)
+    return buf.getvalue()
 
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
@@ -260,6 +299,7 @@ with st.sidebar:
         if st.button("🔄 Veritabanını Yenile", use_container_width=True):
             st.cache_data.clear(); st.rerun()
 
+# ── Main Header ────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="background:#C0392B;padding:18px 24px;border-radius:8px;margin-bottom:20px">
 <h1 style="color:white;margin:0;font-size:22px">✈ REC HAVACILIK – RAQ Form Generator</h1>
@@ -267,50 +307,112 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-icao = st.text_input("ICAO Kodu", max_chars=4, placeholder="EHAM").upper().strip()
+# ── Airport Inputs ─────────────────────────────────────────────────────────────
+st.subheader("🛫 Meydan Bilgileri")
+st.caption("En az 1, en fazla 4 meydan girebilirsiniz. Boş bırakılan meydanlar PDF'e dahil edilmez.")
 
-if icao:
-    if icao in airports:
-        ap = airports[icao]; rk = risks.get(icao)
-        st.markdown(
-            f'<div class="info-card"><h3>✔ {ap["name"]}</h3>'
-            f'<p>ICAO: {ap["icao"]}   |   Kategori: {ap["category"]}   |   Guncelleme: {ap["updated"]}</p></div>',
-            unsafe_allow_html=True,
-        )
-        if rk:
-            st.markdown(
-                f'<div class="risk-box"><p>RISK: {rk["risk_level"]}  |  {rk["ops_approval"]}</p></div>',
-                unsafe_allow_html=True,
-            )
-    elif len(icao) == 4:
-        st.error("Meydan veritabaninda bulunamadi.")
+airport_fields = [
+    ("DEPT",     "Kalkış Meydanı",          "LTBA"),
+    ("DEPT ALT", "Kalkış Alternatif",        "LTFM"),
+    ("DEST",     "Varış Meydanı",            "EHAM"),
+    ("DEST ALT", "Varış Alternatif",         "EGLL"),
+]
+
+icao_inputs = {}
+col_left, col_right = st.columns(2)
+
+for i, (label, desc, placeholder) in enumerate(airport_fields):
+    col = col_left if i % 2 == 0 else col_right
+    with col:
+        st.markdown(f'<span class="airport-label">✈ {label}</span>', unsafe_allow_html=True)
+        icao_val = st.text_input(
+            desc,
+            max_chars=4,
+            placeholder=placeholder,
+            key=f"icao_{label}",
+            label_visibility="collapsed",
+        ).upper().strip()
+        icao_inputs[label] = icao_val
+
+        if icao_val:
+            if icao_val in airports:
+                ap = airports[icao_val]
+                rk = risks.get(icao_val)
+                st.markdown(
+                    f'<div class="info-card" style="padding:8px 14px;margin:4px 0">'
+                    f'<h3 style="font-size:13px">✔ {ap["name"]}</h3>'
+                    f'<p>Kategori: {ap["category"]}</p></div>',
+                    unsafe_allow_html=True,
+                )
+                if rk:
+                    st.markdown(
+                        f'<div class="risk-box"><p>RISK: {rk["risk_level"]}  |  {rk["ops_approval"]}</p></div>',
+                        unsafe_allow_html=True,
+                    )
+            elif len(icao_val) == 4:
+                st.error(f"❌ {icao_val} veritabanında bulunamadı.")
 
 st.divider()
-st.subheader("Ucus Bilgileri")
+
+# ── Flight Info ────────────────────────────────────────────────────────────────
+st.subheader("✈ Uçuş Bilgileri")
 col1, col2 = st.columns(2)
-with col1: pic  = st.text_input("PIC (Ad Soyad / Kod)"); date = st.date_input("Ucus Tarihi", value=datetime.date.today())
-with col2: sic  = st.text_input("SIC (Ad Soyad / Kod)"); ac   = st.text_input("A/C Type", value="TC-REC")
+with col1:
+    pic  = st.text_input("PIC (Ad Soyad / Kod)")
+    date = st.date_input("Uçuş Tarihi", value=datetime.date.today())
+with col2:
+    sic  = st.text_input("SIC (Ad Soyad / Kod)")
+    ac   = st.text_input("A/C Type", value="TC-REC")
+
 st.divider()
 
-if st.button("📄  RAQ FORM PDF OLUSTUR", use_container_width=True, type="primary"):
-    if not icao or icao not in airports:
-        st.error("Gecerli ICAO girin.")
+# ── Generate Button ────────────────────────────────────────────────────────────
+# Collect valid airports
+valid_airports = []
+for label, icao_val in icao_inputs.items():
+    if icao_val and icao_val in airports:
+        valid_airports.append((label, icao_val))
+
+if valid_airports:
+    st.info(f"📋 **{len(valid_airports)} meydan** için PDF oluşturulacak: " +
+            " → ".join([f"**{lbl}** ({icao})" for lbl, icao in valid_airports]))
+else:
+    st.warning("En az bir geçerli meydan girin.")
+
+if st.button("📄  RAQ BOOKLET PDF OLUŞTUR", use_container_width=True, type="primary"):
+    if not valid_airports:
+        st.error("En az bir geçerli ICAO kodu girin.")
     elif not pic:
         st.error("PIC bilgisini girin.")
     else:
-        with st.spinner("PDF olusturuluyor..."):
+        with st.spinner(f"⏳ {len(valid_airports)} sayfalık booklet oluşturuluyor..."):
             try:
-                czib_hit, czib_text = check_czib(icao)
-                if czib_hit:
-                    st.warning(f"⚠ {czib_text}")
-                pdf = generate_pdf(
-                    airports[icao], risks.get(icao),
-                    {"date": date.strftime("%Y-%m-%d"), "ac_type": ac,
-                     "pic": pic, "sic": sic, "czib": czib_text},
+                # Warn for any CZIB hits
+                for lbl, icao_val in valid_airports:
+                    czib_hit, czib_text = check_czib(icao_val)
+                    if czib_hit:
+                        st.warning(f"⚠ {lbl} ({icao_val}): {czib_text}")
+
+                pdf = generate_booklet_pdf(
+                    valid_airports,
+                    airports,
+                    risks,
+                    {
+                        "date":    date.strftime("%Y-%m-%d"),
+                        "ac_type": ac,
+                        "pic":     pic,
+                        "sic":     sic,
+                    },
                 )
-                fname = f"RAQ_{icao}_{date.strftime('%Y-%m-%d')}.pdf"
-                st.success("✔ PDF hazir!")
-                st.download_button("⬇  PDF Indir", pdf, fname, "application/pdf", use_container_width=True)
+
+                icao_str = "-".join([icao for _, icao in valid_airports])
+                fname = f"RAQ_BOOKLET_{icao_str}_{date.strftime('%Y-%m-%d')}.pdf"
+                st.success(f"✔ {len(valid_airports)} sayfalık booklet hazır!")
+                st.download_button(
+                    f"⬇  PDF Booklet İndir ({len(valid_airports)} sayfa)",
+                    pdf, fname, "application/pdf",
+                    use_container_width=True,
+                )
             except Exception as e:
                 st.error(f"Hata: {e}")
 
