@@ -65,18 +65,14 @@ PILOTS_FILE = "pilots.json"
 
 def load_pilots():
     try:
-        with open(PILOTS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        data = st.secrets.get("pilots", {}).get("data", [])
+        return [{"name": p["name"], "surname": p["surname"], "email": p["email"]} for p in data]
     except Exception:
         return []
 
 def save_pilots(pilots):
-    try:
-        with open(PILOTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(pilots, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception:
-        return False
+    # Secrets üzerinden yönetildiği için kaydetme devre dışı
+    return True
 
 def get_pilot_names(pilots):
     return [f"{p['name']} {p['surname']}" for p in pilots]
@@ -362,8 +358,25 @@ airports, risks = load_db()
 # ── ADMIN PANEL ────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙ Admin Panel")
-    pw = st.text_input("Şifre", type="password", key="admin_pw")
-    admin_ok = pw == st.secrets.get("admin", {}).get("password", "rec2024")
+
+    if "admin_authenticated" not in st.session_state:
+        st.session_state["admin_authenticated"] = False
+
+    if not st.session_state["admin_authenticated"]:
+        pw = st.text_input("Şifre", type="password", key="admin_pw")
+        if st.button("🔐 Giriş", use_container_width=True):
+            if pw == st.secrets.get("admin", {}).get("password", "rec2024"):
+                st.session_state["admin_authenticated"] = True
+                st.rerun()
+            else:
+                st.error("Hatalı şifre.")
+        admin_ok = False
+    else:
+        st.success("✔ Giriş başarılı")
+        if st.button("🚪 Çıkış", use_container_width=True):
+            st.session_state["admin_authenticated"] = False
+            st.rerun()
+        admin_ok = True
 
     if admin_ok and pw:
         st.success("✔ Giriş başarılı")
@@ -422,37 +435,16 @@ with st.sidebar:
             st.markdown("**Kayıtlı Pilotlar**")
             pilots_list = load_pilots()
             if pilots_list:
-                for i, p in enumerate(pilots_list):
-                    with st.expander(f"👤 {p['name']} {p['surname']}"):
-                        st.caption(f"📧 {p['email']}")
-                        if st.button("🗑 Sil", key=f"del_pilot_{i}"):
-                            pilots_list.pop(i)
-                            save_pilots(pilots_list)
-                            st.rerun()
+                for p in pilots_list:
+                    st.markdown(
+                        f'<div class="info-card" style="padding:8px 14px;margin:4px 0">'
+                        f'<h3 style="font-size:13px">👤 {p["name"]} {p["surname"]}</h3>'
+                        f'<p>📧 {p["email"]}</p></div>',
+                        unsafe_allow_html=True,
+                    )
             else:
-                st.caption("Henüz pilot eklenmedi.")
-
-            st.divider()
-            st.markdown("**Yeni Pilot Ekle**")
-            p_name    = st.text_input("Ad",     key="p_name")
-            p_surname = st.text_input("Soyad",  key="p_surname")
-            p_email   = st.text_input("E-mail", key="p_email")
-
-            if st.button("➕ Pilot Ekle", use_container_width=True):
-                if p_name and p_surname and p_email:
-                    pilots_list = load_pilots()
-                    pilots_list.append({
-                        "name":    p_name.strip().title(),
-                        "surname": p_surname.strip().title(),
-                        "email":   p_email.strip().lower(),
-                    })
-                    if save_pilots(pilots_list):
-                        st.success(f"✔ {p_name} {p_surname} eklendi!")
-                        st.rerun()
-                    else:
-                        st.error("Kayıt hatası.")
-                else:
-                    st.warning("Ad, soyad ve e-mail zorunlu.")
+                st.caption("Pilot bulunamadı.")
+            st.info("ℹ Pilot eklemek/silmek için Streamlit → Settings → Secrets bölümünü güncelleyin.")
 
 
 # ── MAIN HEADER ────────────────────────────────────────────────────────────────
