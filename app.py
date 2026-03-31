@@ -95,3 +95,35 @@ if icao:
 
 st.divider()
 st.subheader("Ucus Bilgileri")
+col1, col2 = st.columns(2)
+with col1:
+    pic  = st.text_input("PIC (Ad Soyad / Kod)")
+    date = st.date_input("Ucus Tarihi", value=datetime.date.today())
+with col2:
+    sic  = st.text_input("SIC (Ad Soyad / Kod)")
+    ac   = st.text_input("A/C Type", value="TC-REC")
+st.divider()
+
+if st.button("📄  RAQ FORM PDF OLUSTUR", use_container_width=True, type="primary"):
+    if not icao or icao not in airports:
+        st.error("Gecerli ICAO girin.")
+    elif not pic:
+        st.error("PIC bilgisini girin.")
+    else:
+        with st.spinner("PDF olusturuluyor..."):
+            try:
+                czib_hit, czib_text = check_czib(icao)
+                if czib_hit:
+                    st.warning(f"⚠ {czib_text}")
+                pdf = generate_pdf(
+                    airports[icao], risks.get(icao),
+                    {"date": date.strftime("%Y-%m-%d"), "ac_type": ac,
+                     "pic": pic, "sic": sic, "czib": czib_text},
+                )
+                fname = f"RAQ_{icao}_{date.strftime('%Y-%m-%d')}.pdf"
+                st.success("✔ PDF hazir!")
+                st.download_button("⬇  PDF Indir", pdf, fname, "application/pdf", use_container_width=True)
+            except Exception as e:
+                st.error(f"Hata: {e}")
+
+st.caption("© REC HAVACILIK  -  AMC1 ORO.FC.105 b(2);c")
