@@ -100,8 +100,9 @@ def send_email(to_email, pilot_name, airports_list, flight_date, ac_type):
         airport_lines = "\n".join([f"  • {lbl}: {icao}" for lbl, icao in airports_list])
         airport_html  = "<br>".join([f"<b>{lbl}</b>: {icao}" for lbl, icao in airports_list])
 
+        from email.header import Header
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"RAQ Raporu Oluşturuldu – {flight_date}"
+        msg["Subject"] = Header(f"RAQ Raporu Olusturuldu - {flight_date}", "utf-8")
         msg["From"]    = sender
         msg["To"]      = to_email
 
@@ -564,7 +565,7 @@ if st.button("📄  RAQ BOOKLET PDF OLUŞTUR", use_container_width=True, type="p
                     pdf, fname, "application/pdf", use_container_width=True,
                 )
 
-                # Mail gönder
+                # Mail gönder - PIC
                 pilot_obj = find_pilot(pilots, pic)
                 if pilot_obj:
                     ok, msg_result = send_email(
@@ -575,6 +576,19 @@ if st.button("📄  RAQ BOOKLET PDF OLUŞTUR", use_container_width=True, type="p
                         st.success(f"📧 Mail gönderildi → {pilot_obj['email']}")
                     else:
                         st.warning(f"⚠ Mail gönderilemedi: {msg_result}")
+
+                # Mail gönder - SIC
+                if sic:
+                    sic_obj = find_pilot(pilots, sic)
+                    if sic_obj:
+                        ok, msg_result = send_email(
+                            sic_obj["email"], sic,
+                            valid_airports, date.strftime("%Y-%m-%d"), ac,
+                        )
+                        if ok:
+                            st.success(f"📧 Mail gönderildi → {sic_obj['email']}")
+                        else:
+                            st.warning(f"⚠ SIC maili gönderilemedi: {msg_result}")
 
             except Exception as e:
                 st.error(f"Hata: {e}")
