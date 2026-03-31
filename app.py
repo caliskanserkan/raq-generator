@@ -94,4 +94,4 @@ if icao:
         st.error("Meydan veritabaninda bulunamadi.")
 
 st.divider()
-st.subheader("Ucus Bilgileri
+st.subheader("Ucus Bilgileri")
