@@ -8,7 +8,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 st.set_page_config(
-    page_title="RAQ Form Generator - REC Havacilik",
+    page_title="RAQ Form Generator",
     page_icon="✈",
     layout="centered",
     initial_sidebar_state="expanded",
@@ -449,7 +449,7 @@ with st.sidebar:
 # ── MAIN HEADER ────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="background:#1A3A5C;padding:18px 24px;border-radius:8px;margin-bottom:20px">
-<h1 style="color:white;margin:0;font-size:22px">✈ REC HAVACILIK – RAQ Form Generator</h1>
+<h1 style="color:white;margin:0;font-size:22px">✈ RAQ Form Generator</h1>
 <p style="color:#AED6F1;margin:4px 0 0 0;font-size:12px">Route and Aerodrome Qualification Training Form</p>
 </div>
 """, unsafe_allow_html=True)
@@ -505,7 +505,8 @@ pilot_names = get_pilot_names(pilots)
 col1, col2 = st.columns(2)
 with col1:
     if pilot_names:
-        pic = st.selectbox("PIC", options=pilot_names, key="pic_select")
+        pic_raw = st.selectbox("PIC", options=["—"] + pilot_names, key="pic_select")
+        pic = "" if pic_raw == "—" else pic_raw
     else:
         st.warning("⚠ Admin panelde pilot tanımlanmamış.")
         pic = ""
@@ -584,4 +585,4 @@ if st.button("📄  RAQ BOOKLET PDF OLUŞTUR", use_container_width=True, type="p
             except Exception as e:
                 st.error(f"Hata: {e}")
 
-st.caption("© REC HAVACILIK  -  AMC1 ORO.FC.105 b(2);c")
+st.caption("© RAQ Form Generator  -  AMC1 ORO.FC.105 b(2);c")
