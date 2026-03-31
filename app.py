@@ -363,95 +363,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── ADMIN PANEL ────────────────────────────────────────────────────────────────
-if "admin_authenticated" not in st.session_state:
-    st.session_state["admin_authenticated"] = False
-
-with st.expander("⚙ Admin Panel", expanded=False):
-    if not st.session_state["admin_authenticated"]:
-        pw = st.text_input("Şifre", type="password", key="admin_pw")
-        if st.button("🔐 Giriş", use_container_width=True):
-            if pw == st.secrets.get("admin", {}).get("password", "rec2024"):
-                st.session_state["admin_authenticated"] = True
-                st.rerun()
-            else:
-                st.error("Hatalı şifre.")
-        admin_ok = False
-    else:
-        st.success("✔ Giriş başarılı")
-        if st.button("🚪 Çıkış", use_container_width=True):
-            st.session_state["admin_authenticated"] = False
-            st.rerun()
-        admin_ok = True
-
-        tab1, tab2 = st.tabs(["✈ Meydan", "👤 Pilotlar"])
-
-        # ── MEYDAN TAB ─────────────────────────────────────────────────────────
-        with tab1:
-            st.markdown("**Meydan Düzenle / Ekle**")
-            col_icao, col_btn = st.columns([2, 1])
-            with col_icao:
-                icao_e = st.text_input("ICAO Kodu", max_chars=4,
-                                       placeholder="LTFM", key="ei").upper().strip()
-            with col_btn:
-                st.markdown("<br>", unsafe_allow_html=True)
-                load_btn = st.button("📂 Yükle", use_container_width=True)
-
-            if load_btn and icao_e:
-                ap_data = airports.get(icao_e, {})
-                st.session_state["edit_name"] = ap_data.get("name", "")
-                st.session_state["edit_cat"]  = ap_data.get("category", "A")
-                st.session_state["edit_s1"]   = ap_data.get("section1", "")
-                st.session_state["edit_s2"]   = ap_data.get("section2", "")
-                st.session_state["edit_s3"]   = ap_data.get("section3", "")
-                if ap_data:
-                    st.success(f"✔ {icao_e} yüklendi.")
-                else:
-                    st.info(f"ℹ {icao_e} yeni meydan — kutular boş.")
-
-            name_e = st.text_input("Meydan Adı", key="edit_name")
-            cat_e  = st.selectbox("Kategori", ["A", "B", "C"],
-                                   index=["A","B","C"].index(
-                                       st.session_state.get("edit_cat","A"))
-                                   if st.session_state.get("edit_cat","A") in ["A","B","C"] else 0)
-            s1_e = st.text_area("Section 1", key="edit_s1", height=100)
-            s2_e = st.text_area("Section 2", key="edit_s2", height=80)
-            s3_e = st.text_area("Section 3", key="edit_s3", height=80)
-
-            if st.button("💾 Kaydet", use_container_width=True, key="save_ap"):
-                if icao_e:
-                    ok = update_airport(icao_e, {"name": name_e, "category": cat_e,
-                                                 "section1": s1_e, "section2": s2_e,
-                                                 "section3": s3_e})
-                    if ok:
-                        st.success(f"✔ {icao_e} kaydedildi!")
-                        st.cache_data.clear()
-                        airports, risks = load_db()
-                else:
-                    st.warning("ICAO girin.")
-
-            st.divider()
-            if st.button("🔄 Veritabanını Yenile", use_container_width=True):
-                st.cache_data.clear(); st.rerun()
-
-        # ── PILOT TAB ──────────────────────────────────────────────────────────
-        with tab2:
-            st.markdown("**Kayıtlı Pilotlar**")
-            pilots_list = load_pilots()
-            if pilots_list:
-                for p in pilots_list:
-                    st.markdown(
-                        f'<div class="info-card" style="padding:8px 14px;margin:4px 0">'
-                        f'<h3 style="font-size:13px">👤 {p["name"]} {p["surname"]}</h3>'
-                        f'<p>📧 {p["email"]}</p></div>',
-                        unsafe_allow_html=True,
-                    )
-            else:
-                st.caption("Pilot bulunamadı.")
-            st.info("ℹ Pilot eklemek/silmek için Streamlit → Settings → Secrets bölümünü güncelleyin.")
-
-st.divider()
-
 # ── AIRPORT INPUTS ─────────────────────────────────────────────────────────────
 st.subheader("🛫 Meydan Bilgileri")
 st.caption("En az 1, en fazla 4 meydan girebilirsiniz. Boş bırakılan meydanlar PDF'e dahil edilmez.")
@@ -515,7 +426,12 @@ with col2:
         sic = "" if sic_raw == "—" else sic_raw
     else:
         sic = ""
-    ac = st.text_input("A/C Type", value="TC-REC")
+    aircraft_list = st.secrets.get("aircraft", {}).get("list", [])
+    if aircraft_list:
+        ac_raw = st.selectbox("A/C Type", options=["—"] + aircraft_list, key="ac_select")
+        ac = "" if ac_raw == "—" else ac_raw
+    else:
+        ac = st.text_input("A/C Type", value="", placeholder="TC-REC")
 
 st.divider()
 
@@ -584,3 +500,86 @@ if st.button("📄  RAQ BOOKLET PDF OLUŞTUR", use_container_width=True, type="p
                 st.error(f"Hata: {e}")
 
 st.caption("© RAQ Form Generator  -  AMC1 ORO.FC.105 b(2);c")
+
+# ── ADMIN PANEL (sayfa sonu) ───────────────────────────────────────────────────
+if "admin_authenticated" not in st.session_state:
+    st.session_state["admin_authenticated"] = False
+
+with st.expander("⚙", expanded=False):
+    if not st.session_state["admin_authenticated"]:
+        pw = st.text_input("Şifre", type="password", key="admin_pw")
+        if st.button("🔐 Giriş", use_container_width=True):
+            if pw == st.secrets.get("admin", {}).get("password", "rec2024"):
+                st.session_state["admin_authenticated"] = True
+                st.rerun()
+            else:
+                st.error("Hatalı şifre.")
+    else:
+        st.success("✔ Giriş başarılı")
+        if st.button("🚪 Çıkış", use_container_width=True):
+            st.session_state["admin_authenticated"] = False
+            st.rerun()
+
+        tab1, tab2 = st.tabs(["✈ Meydan", "👤 Pilotlar"])
+
+        with tab1:
+            st.markdown("**Meydan Düzenle / Ekle**")
+            col_icao, col_btn = st.columns([2, 1])
+            with col_icao:
+                icao_e = st.text_input("ICAO Kodu", max_chars=4,
+                                       placeholder="LTFM", key="ei").upper().strip()
+            with col_btn:
+                st.markdown("<br>", unsafe_allow_html=True)
+                load_btn = st.button("📂 Yükle", use_container_width=True)
+
+            if load_btn and icao_e:
+                ap_data = airports.get(icao_e, {})
+                st.session_state["edit_name"] = ap_data.get("name", "")
+                st.session_state["edit_cat"]  = ap_data.get("category", "A")
+                st.session_state["edit_s1"]   = ap_data.get("section1", "")
+                st.session_state["edit_s2"]   = ap_data.get("section2", "")
+                st.session_state["edit_s3"]   = ap_data.get("section3", "")
+                if ap_data:
+                    st.success(f"✔ {icao_e} yüklendi.")
+                else:
+                    st.info(f"ℹ {icao_e} yeni meydan — kutular boş.")
+
+            name_e = st.text_input("Meydan Adı", key="edit_name")
+            cat_e  = st.selectbox("Kategori", ["A", "B", "C"],
+                                   index=["A","B","C"].index(
+                                       st.session_state.get("edit_cat","A"))
+                                   if st.session_state.get("edit_cat","A") in ["A","B","C"] else 0)
+            s1_e = st.text_area("Section 1", key="edit_s1", height=100)
+            s2_e = st.text_area("Section 2", key="edit_s2", height=80)
+            s3_e = st.text_area("Section 3", key="edit_s3", height=80)
+
+            if st.button("💾 Kaydet", use_container_width=True, key="save_ap"):
+                if icao_e:
+                    ok = update_airport(icao_e, {"name": name_e, "category": cat_e,
+                                                 "section1": s1_e, "section2": s2_e,
+                                                 "section3": s3_e})
+                    if ok:
+                        st.success(f"✔ {icao_e} kaydedildi!")
+                        st.cache_data.clear()
+                        airports, risks = load_db()
+                else:
+                    st.warning("ICAO girin.")
+
+            st.divider()
+            if st.button("🔄 Veritabanını Yenile", use_container_width=True):
+                st.cache_data.clear(); st.rerun()
+
+        with tab2:
+            st.markdown("**Kayıtlı Pilotlar**")
+            pilots_list = load_pilots()
+            if pilots_list:
+                for p in pilots_list:
+                    st.markdown(
+                        f'<div class="info-card" style="padding:8px 14px;margin:4px 0">'
+                        f'<h3 style="font-size:13px">👤 {p["name"]} {p["surname"]}</h3>'
+                        f'<p>📧 {p["email"]}</p></div>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.caption("Pilot bulunamadı.")
+            st.info("ℹ Pilot eklemek/silmek için Streamlit → Settings → Secrets bölümünü güncelleyin.")
