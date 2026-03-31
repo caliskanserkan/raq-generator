@@ -224,7 +224,7 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     cw3 = [W * .22, W * .55, W * .23]; x = ML
     for text, w2, font, size, color, align in [
         ("Completed by:", cw3[0], FB, 9, DARK, "center"),
-        (fi.get("pic", ""), cw3[1], FB, 9, DARK, "center"),
+        (fi.get("pic", "").upper(), cw3[1], FB, 9, DARK, "center"),
         (today, cw3[2], FN, 8, STEEL, "right"),
     ]:
         bx(x, y, w2, 20, fill=LIGHT, stroke=BORD); tx(text, x, y - 15, font, size, color, align, w2); x += w2
