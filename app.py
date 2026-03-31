@@ -378,8 +378,7 @@ with st.sidebar:
             st.rerun()
         admin_ok = True
 
-    if admin_ok and pw:
-        st.success("✔ Giriş başarılı")
+    if admin_ok:
         tab1, tab2 = st.tabs(["✈ Meydan", "👤 Pilotlar"])
 
         # ── MEYDAN TAB ─────────────────────────────────────────────────────────
