@@ -62,11 +62,11 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     from reportlab.lib import colors
     from reportlab.lib.units import mm
 
-    RED   = colors.HexColor("#C0392B"); DARK  = colors.HexColor("#1A252F")
-    MID   = colors.HexColor("#2C3E50"); STEEL = colors.HexColor("#4A6274")
-    LIGHT = colors.HexColor("#FDFEFE"); ALT   = colors.HexColor("#F2F3F4")
-    INPB  = colors.HexColor("#EBF5FB"); RISKB = colors.HexColor("#FADBD8")
-    BORD  = colors.HexColor("#AEB6BF"); W_    = colors.white
+    RED   = colors.HexColor("#C0392B"); DARK  = colors.HexColor("#111111")
+    MID   = colors.HexColor("#1A3A5C"); STEEL = colors.HexColor("#2E5F8A")
+    LIGHT = colors.white;               ALT   = colors.white
+    INPB  = colors.white;               RISKB = colors.white
+    BORD  = colors.HexColor("#888888"); W_    = colors.white
 
     PW, PH = A4; ML = 15 * mm; W = PW - 2 * ML
     y = PH - 12 * mm
@@ -97,10 +97,10 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
         return lines
 
     def shdr(yt, lbl, h=14):
-        bx(ML, yt, W, h, fill=MID, stroke=MID); tx(lbl, ML + 6, yt - h + 4, FB, 8.5, W_); return yt - h
+        bx(ML, yt, W, h, fill=MID, stroke=MID, sw=0.8); tx(lbl, ML + 6, yt - h + 4, FB, 8.5, W_); return yt - h
 
     def sbhdr(yt, lbl, h=12):
-        bx(ML, yt, W, h, fill=STEEL, stroke=STEEL); tx(lbl, ML + 4, yt - h + 3, FB, 8, W_); return yt - h
+        bx(ML, yt, W, h, fill=STEEL, stroke=STEEL, sw=0.8); tx(lbl, ML + 4, yt - h + 3, FB, 8, W_); return yt - h
 
     def tblk(yt, text, bg=LIGHT, pad=6):
         lines = text.split("\n") if text else ["N/A"]
@@ -130,12 +130,13 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
 
     # Header
     hh = 26
-    bx(ML, y, W * .72, hh, fill=RED, stroke=DARK, sw=1); bx(ML + W * .72, y, W * .28, hh, fill=MID, stroke=DARK, sw=1)
-    header_title = f"REC HAVACILIK  ✈  YOL VE MEYDAN YETERLİLİK EĞİTİM FORMU"
-    if page_label:
-        header_title += f"  [{page_label}]"
-    tx(header_title, ML + 8, y - hh + 8, FB, 9.5, W_)
-    tx("FOP-FRM02 | Rev 0 | 2023-10-31", ML + W * .72 + 4, y - hh + 8, FB, 7, W_); y -= hh
+    rev_date = datetime.date.today().strftime("%Y-%m-%d")
+    bx(ML, y, W * .72, hh, fill=MID, stroke=MID, sw=1)
+    bx(ML + W * .72, y, W * .28, hh, fill=MID, stroke=MID, sw=1)
+    tx("REC HAVACILIK  ✈  YOL VE MEYDAN YETERLİLİK EĞİTİM FORMU", ML + 8, y - hh + 8, FB, 9.5, W_)
+    tx("FOP-FRM02", ML + W * .72 + 4, y - 7, FB, 7, W_)
+    tx(f"Rev: {rev_date}", ML + W * .72 + 4, y - hh + 6, FB, 8, RED)
+    y -= hh
     bx(ML, y, W, 13, fill=LIGHT, stroke=BORD)
     tx("ROUTE AND AERODROME QUALIFICATION TRAINING FORM", ML, y - 10, FI, 8, STEEL, "center", W); y -= 16
 
@@ -143,17 +144,17 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     cw = [W * .18, W * .15, W * .335, W * .335]
     y = chdrs(y, [("Date", cw[0]), ("A/C Type", cw[1]), ("PIC", cw[2]), ("SIC", cw[3])])
     y = cdata(y, [(fi.get("date", ""), cw[0], FB, 9, DARK, "center"),
-                  (fi.get("ac_type", ""), cw[1], FB, 9, DARK, "center"),
-                  (fi.get("pic", ""), cw[2], FB, 9, DARK, "center"),
-                  (fi.get("sic", ""), cw[3], FB, 9, DARK, "center")]); y -= 3
+                  (fi.get("ac_type", "").upper(), cw[1], FB, 9, DARK, "center"),
+                  (fi.get("pic", "").upper(), cw[2], FB, 9, DARK, "center"),
+                  (fi.get("sic", "").upper(), cw[3], FB, 9, DARK, "center")]); y -= 3
 
     y = shdr(y, "AERODROME")
     cw2 = [W * .50, W * .25, W * .25]
     y = chdrs(y, [("Airport Name", cw2[0]), ("ICAO", cw2[1]), ("Category", cw2[2])])
     ah = 22; x = ML
-    for text, w2, font, size, color in [(airport.get("name", ""), cw2[0], FB, 9, DARK),
-                                         (airport.get("icao", ""), cw2[1], FB, 9, DARK),
-                                         (airport.get("category", ""), cw2[2], FB, 13, RED)]:
+    for text, w2, font, size, color in [(airport.get("name", "").upper(), cw2[0], FB, 9, DARK),
+                                         (airport.get("icao", "").upper(), cw2[1], FB, 9, DARK),
+                                         (airport.get("category", "").upper(), cw2[2], FB, 13, RED)]:
         bx(x, y, w2, ah, fill=LIGHT, stroke=BORD); tx(text, x, y - ah + 5, font, size, color, "center", w2); x += w2
     y -= ah + 3
 
@@ -301,9 +302,9 @@ with st.sidebar:
 
 # ── Main Header ────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="background:#C0392B;padding:18px 24px;border-radius:8px;margin-bottom:20px">
+<div style="background:#1A3A5C;padding:18px 24px;border-radius:8px;margin-bottom:20px">
 <h1 style="color:white;margin:0;font-size:22px">✈ REC HAVACILIK – RAQ Form Generator</h1>
-<p style="color:#FADBD8;margin:4px 0 0 0;font-size:12px">Route and Aerodrome Qualification Training Form</p>
+<p style="color:#AED6F1;margin:4px 0 0 0;font-size:12px">Route and Aerodrome Qualification Training Form</p>
 </div>
 """, unsafe_allow_html=True)
 
