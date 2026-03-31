@@ -11,7 +11,7 @@ st.set_page_config(
     page_title="RAQ Form Generator",
     page_icon="✈",
     layout="centered",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 st.markdown("""
@@ -355,13 +355,19 @@ def generate_booklet_pdf(airport_list, airports_db, risks_db, fi):
 # ── Load DB ────────────────────────────────────────────────────────────────────
 airports, risks = load_db()
 
+# ── MAIN HEADER ────────────────────────────────────────────────────────────────
+st.markdown("""
+<div style="background:#1A3A5C;padding:18px 24px;border-radius:8px;margin-bottom:20px">
+<h1 style="color:white;margin:0;font-size:22px">✈ RAQ Form Generator</h1>
+<p style="color:#AED6F1;margin:4px 0 0 0;font-size:12px">Route and Aerodrome Qualification Training Form</p>
+</div>
+""", unsafe_allow_html=True)
+
 # ── ADMIN PANEL ────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### ⚙ Admin Panel")
+if "admin_authenticated" not in st.session_state:
+    st.session_state["admin_authenticated"] = False
 
-    if "admin_authenticated" not in st.session_state:
-        st.session_state["admin_authenticated"] = False
-
+with st.expander("⚙ Admin Panel", expanded=False):
     if not st.session_state["admin_authenticated"]:
         pw = st.text_input("Şifre", type="password", key="admin_pw")
         if st.button("🔐 Giriş", use_container_width=True):
@@ -378,7 +384,6 @@ with st.sidebar:
             st.rerun()
         admin_ok = True
 
-    if admin_ok:
         tab1, tab2 = st.tabs(["✈ Meydan", "👤 Pilotlar"])
 
         # ── MEYDAN TAB ─────────────────────────────────────────────────────────
@@ -445,14 +450,7 @@ with st.sidebar:
                 st.caption("Pilot bulunamadı.")
             st.info("ℹ Pilot eklemek/silmek için Streamlit → Settings → Secrets bölümünü güncelleyin.")
 
-
-# ── MAIN HEADER ────────────────────────────────────────────────────────────────
-st.markdown("""
-<div style="background:#1A3A5C;padding:18px 24px;border-radius:8px;margin-bottom:20px">
-<h1 style="color:white;margin:0;font-size:22px">✈ RAQ Form Generator</h1>
-<p style="color:#AED6F1;margin:4px 0 0 0;font-size:12px">Route and Aerodrome Qualification Training Form</p>
-</div>
-""", unsafe_allow_html=True)
+st.divider()
 
 # ── AIRPORT INPUTS ─────────────────────────────────────────────────────────────
 st.subheader("🛫 Meydan Bilgileri")
