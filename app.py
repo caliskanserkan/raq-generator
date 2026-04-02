@@ -270,18 +270,13 @@ def calc_risk(s):
         elif has_cat2 and not has_cat3 and s.get('lvp') == 'frequent':
             add(1, 'CAT II only — no CAT III capability; frequent LVP at this aerodrome', 'Verify crew and aircraft CAT II certification; brief go-around at CAT II minima')
 
-        # GNSS outage cross-check — RNP/GLS approaches become unreliable
+        # GNSS outage cross-check — only GLS and RNP AR/RNP are GNSS-dependent
+        GNSS_DEP = {'GLS', 'RNP AR', 'RNP'}
         if s.get('gnss_outage'):
-            # Only RNP AR and GLS are GNSS-dependent. CAT II/III use ILS — not affected.
             gnss_dep_rwys = [
                 rwy for rwy, types in rwy_approaches.items()
-                if any('RNP' in t or 'GLS' in t for t in types)
+                if any(t in GNSS_DEP for t in types)
             ]
-            has_ils_backup = any(
-                any(t in ('Precision CAT III', 'Precision CAT II', 'Precision (ILS/GLS/RNP AR)') for t in types)
-                and any('CAT' in t or 'ILS' in t for t in types)
-                for types in rwy_approaches.values()
-            )
             if gnss_dep_rwys:
                 add(3, f"GNSS outage — RNP AR / GLS approach(es) unreliable on RWY {', '.join(gnss_dep_rwys)} (ILS / CAT II/III unaffected)",
                     'Use ILS or CAT II/III approach where available; apply non-precision minima if only RNP available')
@@ -938,10 +933,10 @@ with st.expander("⚙", expanded=False):
                         help="GNSS outage durumunda RNP AR ve GLS yaklaşmaları güvenilmez hale gelir."
                     )
                     if ra_gnss_outage:
-                        # Only RNP AR and GLS are GNSS-dependent. CAT II/III use ILS — not affected.
+                        GNSS_DEP = {'GLS', 'RNP AR', 'RNP'}
                         gnss_affected = [
                             rwy for rwy, types in rwy_approaches.items()
-                            if any("RNP" in t or "GLS" in t for t in types)
+                            if any(t in GNSS_DEP for t in types)
                         ]
                         st.warning(
                             f"⚠️ GNSS outage aktif — RNP AR / GLS yaklaşmalar güvenilmez! "
