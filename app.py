@@ -339,7 +339,18 @@ def gen_summary_items(s):
     if s.get('sp_crew'):          items.append("Special crew qualification required")
     if s.get('sp_approval'):      items.append("Special operator approval required for this destination")
     if not s.get('prec'):         items.append("No precision approach available — non-precision only")
-    elif s.get('prec'):           items.append("Precision approach (ILS / GLS / RNP AR) available")
+    elif s.get('prec'):
+        # Build precision string only from what was actually selected
+        rwy_app = s.get('rwy_approaches', {})
+        prec_types_selected = set()
+        for types in rwy_app.values():
+            for t in types:
+                if t in ('Precision CAT III', 'Precision CAT II', 'ILS', 'GLS', 'RNP AR', 'RNP', 'Offset Precision'):
+                    prec_types_selected.add(t)
+        if prec_types_selected:
+            items.append(f"Precision approach available: {' / '.join(sorted(prec_types_selected))}")
+        else:
+            items.append("Precision approach available")
     if s.get('angle') == 'steep':    items.append("Steep approach required — angle ≥ 4.5°")
     elif s.get('angle') == 'moderate': items.append("Elevated approach angle — 3.9° to 4.49°")
     if s.get('msa_ft', 0) > 0:
