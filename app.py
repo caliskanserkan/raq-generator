@@ -1143,9 +1143,11 @@ with st.expander("⚙", expanded=False):
                                 st.success(f"✔ {icao_e} risk değerlendirmesi kaydedildi! Yeniden değerlendirme: {due_str}")
                                 st.cache_data.clear()
                                 airports, risks = load_db()
-                                # Clear result from session after save
-                                for k in ['ra_result','ra_summary','ra_survey','ra_icao']:
-                                    if k in st.session_state: del st.session_state[k]
+                                # Clear ALL ra_ form keys so form resets for next airport
+                                keys_to_clear = [k for k in st.session_state if k.startswith('ra_') or k in ('edit_name','edit_cat','edit_summary','ei')]
+                                for k in keys_to_clear:
+                                    del st.session_state[k]
+                                st.session_state['ra_rwy_sets'] = 1
                                 st.rerun()
                             else:
                                 st.error("Kayıt başarısız.")
