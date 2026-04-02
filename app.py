@@ -242,6 +242,8 @@ def calc_risk(s):
         has_any_precision   = any('Precision' in v and 'Offset' not in v for vals in rwy_approaches.values() for v in vals)
         has_offset_prec     = any('Offset Precision' in vals for vals in rwy_approaches.values())
         has_offset_nonprec  = any('Offset Non-Precision' in vals for vals in rwy_approaches.values())
+        has_cat3            = any('Precision CAT III' in vals for vals in rwy_approaches.values())
+        has_cat2            = any('Precision CAT II' in vals for vals in rwy_approaches.values())
         all_non_prec        = all(
             all(v in ('Non-Precision', 'Offset Non-Precision') for v in vals) if vals else True
             for vals in rwy_approaches.values()
@@ -252,6 +254,10 @@ def calc_risk(s):
             add(1, 'Offset precision approach in use on at least one runway', 'Brief offset ILS/LPV technique; increased go-around awareness required')
         if has_offset_nonprec:
             add(1, 'Offset non-precision approach in use on at least one runway', 'Brief offset approach technique; review visual segment carefully')
+        if not has_cat2 and not has_cat3 and s.get('lvp') in ('sometimes', 'frequent'):
+            add(2, 'No CAT II/III capability on any runway — LVP operations not possible', 'Verify alternate has CAT capability; plan for diversion if LVP conditions develop')
+        elif has_cat2 and not has_cat3 and s.get('lvp') == 'frequent':
+            add(1, 'CAT II only — no CAT III capability; frequent LVP at this aerodrome', 'Verify crew and aircraft CAT II certification; brief go-around at CAT II minima')
 
     # Block 8 — Alternate / Operational
     if s.get('alt') == 'limited': add(2, 'Limited alternate options within fuel planning range', 'Identify extended-range alternates; plan additional contingency fuel')
@@ -322,7 +328,6 @@ def gen_summary_items(s):
     if rc == 'after_landing':     items.append("Runway crossing required after landing — obtain ATC clearance")
     elif rc == 'before_departure': items.append("Runway crossing required before departure — obtain ATC clearance")
     elif rc == 'both':            items.append("Runway crossing required for arrival and departure — heightened awareness")
-    # Runway approach capabilities
     rwy_approaches = s.get('rwy_approaches', {})
     if rwy_approaches:
         for rwy, types in rwy_approaches.items():
@@ -871,7 +876,7 @@ with st.expander("⚙", expanded=False):
                         for rwy in active_runways:
                             types = st.multiselect(
                                 f"✈ RWY {rwy} — Approach tipi",
-                                ["Precision", "Non-Precision", "Offset Precision", "Offset Non-Precision"],
+                                ["Precision CAT III", "Precision CAT II", "Precision (ILS/GLS/RNP AR)", "Offset Precision", "Non-Precision", "Offset Non-Precision"],
                                 key=f"ra_app_{rwy}"
                             )
                             rwy_approaches[rwy] = types
