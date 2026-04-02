@@ -935,7 +935,7 @@ with st.expander("⚙", expanded=False):
 
                     ra_gnss_outage = st.checkbox(
                         "⚠️ GNSS outage / GPS NOTAM in effect or expected?",
-                        key="ra_gnss",
+                        key="ra_gnss_outage",
                         help="GNSS outage durumunda RNP AR ve GLS yaklaşmaları güvenilmez hale gelir."
                     )
                     if ra_gnss_outage:
