@@ -219,6 +219,13 @@ def calc_risk(s):
     if s.get('atc') == 'moderate':   add(1, 'Moderate ATC / taxi routing complexity')
     if s.get('atc') == 'significant': add(2, 'Significant ATC / slot / sequencing complexity', 'Allow extra time margins for clearances; pre-brief complex taxi routing')
     if s.get('mil_traff'): add(2, 'Military / mixed traffic or unusual ATC phraseology', 'Review local ATC procedures and non-standard phraseology before flight')
+    gnss = s.get('gnss_risk', 'no')
+    if gnss == 'notam':
+        add(2, 'GNSS spoofing / jamming advisories in effect for this region',
+            'Do not rely solely on GNSS; cross-check position with conventional navaids (VOR/DME/ILS); monitor NOTAMs')
+    elif gnss == 'active':
+        add(4, 'Active GNSS spoofing / jamming reported in this region',
+            'GNSS unreliable — use conventional navaids as primary; avoid RNP AR if ILS/VOR available; brief crew on degraded nav procedures')
 
     # Block 7 — Security / Oversight (weighted 3–4 pts)
     if s.get('pol_risk') == 'caution':     add(3, 'Political / security caution advisories in effect', 'Obtain current security briefing; review crew emergency protocols for this region')
@@ -239,17 +246,21 @@ def calc_risk(s):
     # Runway approach capabilities (derived from per-runway data)
     rwy_approaches = s.get('rwy_approaches', {})
     if rwy_approaches:
-        has_any_precision   = any('Precision' in v and 'Offset' not in v for vals in rwy_approaches.values() for v in vals)
-        has_offset_prec     = any('Offset Precision' in vals for vals in rwy_approaches.values())
-        has_offset_nonprec  = any('Offset Non-Precision' in vals for vals in rwy_approaches.values())
-        has_cat3            = any('Precision CAT III' in vals for vals in rwy_approaches.values())
-        has_cat2            = any('Precision CAT II' in vals for vals in rwy_approaches.values())
-        all_non_prec        = all(
+        PRECISION_TYPES = {'Precision CAT III', 'Precision CAT II', 'ILS', 'GLS', 'RNP AR', 'RNP', 'Offset Precision'}
+        has_any_precision  = any(v in PRECISION_TYPES for vals in rwy_approaches.values() for v in vals)
+        has_offset_prec    = any('Offset Precision' in vals for vals in rwy_approaches.values())
+        has_offset_nonprec = any('Offset Non-Precision' in vals for vals in rwy_approaches.values())
+        has_cat3           = any('Precision CAT III' in vals for vals in rwy_approaches.values())
+        has_cat2           = any('Precision CAT II' in vals for vals in rwy_approaches.values())
+        has_rnp_ar         = any('RNP AR' in vals for vals in rwy_approaches.values())
+        all_non_prec       = all(
             all(v in ('Non-Precision', 'Offset Non-Precision') for v in vals) if vals else True
             for vals in rwy_approaches.values()
         )
         if all_non_prec and not s.get('prec'):
             add(1, 'All runways — non-precision approach only (confirmed by runway capability data)')
+        if has_rnp_ar:
+            add(1, 'RNP AR approach in use — special crew authorisation required', 'Verify crew holds RNP AR authorisation; confirm aircraft eligibility and database currency')
         if has_offset_prec:
             add(1, 'Offset precision approach in use on at least one runway', 'Brief offset ILS/LPV technique; increased go-around awareness required')
         if has_offset_nonprec:
@@ -258,6 +269,23 @@ def calc_risk(s):
             add(2, 'No CAT II/III capability on any runway — LVP operations not possible', 'Verify alternate has CAT capability; plan for diversion if LVP conditions develop')
         elif has_cat2 and not has_cat3 and s.get('lvp') == 'frequent':
             add(1, 'CAT II only — no CAT III capability; frequent LVP at this aerodrome', 'Verify crew and aircraft CAT II certification; brief go-around at CAT II minima')
+
+        # GNSS outage cross-check — RNP/GLS approaches become unreliable
+        if s.get('gnss_outage'):
+            gnss_dep_rwys = [
+                rwy for rwy, types in rwy_approaches.items()
+                if any(t in ('Precision CAT III', 'Precision CAT II', 'Precision (ILS/GLS/RNP AR)', 'Offset Precision') for t in types)
+            ]
+            has_ils_backup = any(
+                'Precision (ILS/GLS/RNP AR)' in types or 'Precision CAT II' in types or 'Precision CAT III' in types
+                for types in rwy_approaches.values()
+            )
+            if gnss_dep_rwys:
+                add(3, f"GNSS outage — precision approach(es) on RWY {', '.join(gnss_dep_rwys)} may be unreliable (RNP AR / GLS affected)",
+                    'Confirm ILS availability as backup; if no ILS — treat as non-precision only and apply non-precision minima')
+                if not has_ils_backup:
+                    add(2, 'No confirmed ILS backup — GNSS outage leaves only non-precision approaches available',
+                        'Brief non-precision approach technique; apply higher minima; consider alternate if conditions marginal')
 
     # Block 8 — Alternate / Operational
     if s.get('alt') == 'limited': add(2, 'Limited alternate options within fuel planning range', 'Identify extended-range alternates; plan additional contingency fuel')
@@ -333,6 +361,8 @@ def gen_summary_items(s):
         for rwy, types in rwy_approaches.items():
             if types:
                 items.append(f"RWY {rwy}: {' / '.join(types)}")
+    if s.get('gnss_outage'):
+        items.append("⚠ GNSS outage / GPS NOTAM in effect — RNP AR / GLS approaches unreliable; confirm ILS availability")
     if s.get('atc') == 'significant': items.append("Significant ATC / sequencing complexity — extra time margins required")
     elif s.get('atc') == 'moderate': items.append("Moderate ATC / taxi routing complexity")
     if s.get('mil_traff'):        items.append("Military / mixed traffic or non-standard ATC phraseology in use")
@@ -876,7 +906,7 @@ with st.expander("⚙", expanded=False):
                         for rwy in active_runways:
                             types = st.multiselect(
                                 f"✈ RWY {rwy} — Approach tipi",
-                                ["Precision CAT III", "Precision CAT II", "Precision (ILS/GLS/RNP AR)", "Offset Precision", "Non-Precision", "Offset Non-Precision"],
+                                ["Precision CAT III", "Precision CAT II", "ILS", "GLS", "RNP AR", "RNP", "Offset Precision", "Non-Precision", "Offset Non-Precision"],
                                 key=f"ra_app_{rwy}"
                             )
                             rwy_approaches[rwy] = types
@@ -902,6 +932,28 @@ with st.expander("⚙", expanded=False):
                     ra_oei_ma = st.checkbox("Engine-out go-around requires dedicated crew briefing?", key="ra_oema")
                     if ra_oei_ma and active_runways:
                         st.multiselect("↳ OEI go-around — Hangi pist(ler)?", active_runways, key="ra_oema_rwys")
+
+                    ra_gnss_outage = st.checkbox(
+                        "⚠️ GNSS outage / GPS NOTAM in effect or expected?",
+                        key="ra_gnss",
+                        help="GNSS outage durumunda RNP AR ve GLS yaklaşmaları güvenilmez hale gelir."
+                    )
+                    if ra_gnss_outage:
+                        # Check if any runway has GNSS-dependent approach
+                        gnss_dep_rwys = [
+                            rwy for rwy, types in rwy_approaches.items()
+                            if any(t in ("Precision CAT III", "Precision CAT II", "Precision (ILS/GLS/RNP AR)", "Offset Precision") for t in types)
+                            and not any(t == "Precision (ILS/GLS/RNP AR)" for t in types)  # ILS is not GNSS-dependent
+                        ]
+                        # Simpler: warn if any RNP/GLS approach exists
+                        gnss_affected = [
+                            rwy for rwy, types in rwy_approaches.items()
+                            if any("RNP" in t or "GLS" in t or "Precision CAT" in t for t in types)
+                        ]
+                        st.warning(
+                            f"⚠️ GNSS outage aktif — RNP AR / GLS bağımlı yaklaşmalar güvenilmez! "
+                            f"{'Etkilenen pistler: ' + ', '.join(gnss_affected) if gnss_affected else 'ILS tabanlı yaklaşmaları tercih edin.'}"
+                        )
 
                     st.markdown('<div class="ra-block"><h4>🛬 Block 3 — Runway & Physical</h4></div>', unsafe_allow_html=True)
                     ra_rwy_w = st.selectbox("Runway width?", ["≥ 45 m","30–44 m","< 30 m"], key="ra_rwyw")
@@ -938,6 +990,11 @@ with st.expander("⚙", expanded=False):
                     ra_atc = st.selectbox("ATC / slot / taxi complexity?",
                                           ["Low / normal","Moderate","Significant"], key="ra_atc")
                     ra_mil_traff = st.checkbox("Military / mixed traffic or unusual ATC phraseology?", key="ra_mil")
+                    ra_gnss_risk = st.selectbox("GNSS spoofing / jamming / outage risk in this region?",
+                                                ["No known risk",
+                                                 "NOTAMs / advisories issued — caution",
+                                                 "Active spoofing / jamming reported"],
+                                                key="ra_gnss")
 
                     st.markdown('<div class="ra-block"><h4>🔐 Block 7 — Security, State & Oversight</h4></div>', unsafe_allow_html=True)
                     ra_pol_risk = st.selectbox("Political / security risk?",
@@ -995,6 +1052,7 @@ with st.expander("⚙", expanded=False):
                             'oei_ma_brief':  ra_oei_ma,
                             'rwy_approaches': rwy_approaches,
                             'active_runways': active_runways,
+                            'gnss_outage':    ra_gnss_outage,
                             'rwy_w':         rwy_map[ra_rwy_w],
                             'rwy_marg':      ra_rwy_marg,
                             'phys_comp':     ra_phys_comp,
