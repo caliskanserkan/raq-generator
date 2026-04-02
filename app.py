@@ -8,7 +8,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 st.set_page_config(
-    page_title="RAQ Form Generator",
+    page_title="Flight Briefing and Awareness Tool",
     page_icon="✈",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -27,14 +27,19 @@ footer { visibility: hidden; }
 .info-card { background-color:#1A3A5C; padding:12px 16px; border-radius:8px; margin:8px 0; }
 .info-card h3 { color:white; margin:0 0 4px 0; font-size:14px; }
 .info-card p  { color:#AED6F1; margin:0; font-size:12px; }
-.risk-box { background-color:#FADBD8; border:2px solid #C0392B; border-radius:6px; padding:8px 12px; margin:4px 0; }
-.risk-box p { color:#C0392B; font-weight:bold; margin:0; font-size:12px; }
+.risk-box-high { background-color:#FADBD8; border:2px solid #C0392B; border-radius:6px; padding:8px 12px; margin:4px 0; }
+.risk-box-high p { color:#C0392B; font-weight:bold; margin:0; font-size:12px; }
+.risk-box-med  { background-color:#FEF9E7; border:2px solid #D4AC0D; border-radius:6px; padding:8px 12px; margin:4px 0; }
+.risk-box-med  p { color:#9A7D0A; font-weight:bold; margin:0; font-size:12px; }
+.risk-box-low  { background-color:#EAFAF1; border:2px solid #1E8449; border-radius:6px; padding:8px 12px; margin:4px 0; }
+.risk-box-low  p { color:#1E8449; font-weight:bold; margin:0; font-size:12px; }
 .airport-label { background-color:#1A3A5C; color:white; padding:6px 12px; border-radius:6px;
                  font-size:13px; font-weight:bold; margin-bottom:4px; display:inline-block; }
+.ra-block { background:#F8F9FA; border-left:4px solid #1A3A5C; padding:12px 16px; border-radius:0 6px 6px 0; margin:12px 0; }
+.ra-block h4 { color:#1A3A5C; margin:0 0 10px 0; font-size:14px; }
 @media (max-width: 768px) {
     .stTextInput input { font-size:16px !important; }
     .stButton button { height:52px !important; font-size:15px !important; }
-    .stSelectbox select { font-size:16px !important; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -61,8 +66,6 @@ FI = "RAQI" if _dv else "Helvetica-Oblique"
 
 
 # ── Pilot Management ───────────────────────────────────────────────────────────
-PILOTS_FILE = "pilots.json"
-
 def load_pilots():
     try:
         data = st.secrets.get("pilots", {}).get("data", [])
@@ -71,7 +74,6 @@ def load_pilots():
         return []
 
 def save_pilots(pilots):
-    # Secrets üzerinden yönetildiği için kaydetme devre dışı
     return True
 
 def get_pilot_names(pilots):
@@ -98,13 +100,13 @@ def send_email(to_email, pilot_name, airports_list, flight_date, ac_type):
 
         from email.header import Header
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = Header(f"RAQ Raporu Olusturuldu - {flight_date}", "utf-8")
+        msg["Subject"] = Header(f"Flight Briefing - {flight_date}", "utf-8")
         msg["From"]    = sender
         msg["To"]      = to_email
 
         text = f"""Sayın {pilot_name},
 
-RASS adınıza aşağıdaki uçuş için RAQ formu oluşturulmuştur:
+Adınıza aşağıdaki uçuş için Flight Briefing formu oluşturulmuştur:
 
 Tarih    : {flight_date}
 A/C Type : {ac_type}
@@ -113,15 +115,15 @@ Meydanlar:
 
 Oluşturulma: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")} UTC
 Bu mail otomatik olarak gönderilmiştir.
-REC HAVACILIK – RAQ Form Generator
+REC HAVACILIK – Flight Briefing and Awareness Tool
 """
         html = f"""
 <html><body style="font-family:Arial,sans-serif;color:#222;font-size:14px;">
 <div style="background:#1A3A5C;padding:16px 24px;border-radius:8px;margin-bottom:16px">
-  <h2 style="color:white;margin:0;font-size:18px">✈ REC HAVACILIK – RAQ Raporu Oluşturuldu</h2>
+  <h2 style="color:white;margin:0;font-size:18px">✈ REC HAVACILIK – Flight Briefing Oluşturuldu</h2>
 </div>
 <p>Sayın <strong>{pilot_name}</strong>,</p>
-<p>RASS adınıza aşağıdaki uçuş için RAQ formu oluşturulmuştur:</p>
+<p>Adınıza aşağıdaki uçuş için Flight Briefing formu oluşturulmuştur:</p>
 <table style="border-collapse:collapse;width:100%;max-width:480px">
   <tr><td style="padding:6px 12px;background:#f4f4f4;font-weight:bold;border:1px solid #ddd">Tarih</td>
       <td style="padding:6px 12px;border:1px solid #ddd">{flight_date}</td></tr>
@@ -147,6 +149,157 @@ REC HAVACILIK – RAQ Form Generator
         return False, str(e)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# RISK ASSESSMENT ENGINE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def calc_risk(s):
+    score = 0
+    override_high = False
+    override_medium = False
+    override_reasons = []
+    drivers = []
+    actions = []
+
+    def add(pts, d=None, a=None):
+        nonlocal score
+        score += pts
+        if d: drivers.append(d)
+        if a: actions.append(a)
+
+    # — Overrides —
+    if s.get('cat') == 'C':
+        override_high = True
+        override_reasons.append('CAT C aerodrome (auto override)')
+    if s.get('pol_risk') == 'high':
+        override_high = True
+        override_reasons.append('High security / political threat (auto override)')
+    if not s.get('prec') and s.get('angle') == 'steep' and s.get('oei_sid'):
+        override_high = True
+        override_reasons.append('Combination override: no precision + steep approach + special OEI SID')
+    if s.get('sp_approval'):
+        override_medium = True
+        override_reasons.append('Special operator approval required')
+    if s.get('lvp') == 'frequent' and s.get('alt') == 'no':
+        override_medium = True
+        override_reasons.append('Frequent LVP conditions + no adequate alternate within range')
+
+    # Block 1 — Classification
+    if s.get('sp_desig'):    add(2, 'Special aerodrome designation applies', 'Verify operator-specific procedures for this designation')
+    if s.get('sp_crew'):     add(2, 'Special crew qualification required', 'Verify crew holds required qualification and recency')
+    if s.get('sp_approval'): add(2, 'Special operator approval required', 'Obtain and file approval documentation prior to flight')
+
+    # Block 2 — Approach
+    if not s.get('prec'):            add(2, 'No precision approach available', 'Confirm crew currency on non-precision approach; review technique and minima')
+    if s.get('angle') == 'moderate': add(2, 'Elevated approach angle (3.9°–4.49°)')
+    if s.get('angle') == 'steep':    add(3, 'Steep approach angle (≥ 4.5°)', 'Brief steep approach technique; verify aircraft certification and performance compliance')
+    if s.get('high_da'):             add(1, 'Terrain-limited precision minima — DA/DH ≥ 400 ft')
+    if s.get('offset'):              add(1, 'Offset localizer / offset approach procedure in use')
+    if s.get('madem'):               add(2, 'Demanding missed approach / climb gradient above standard', 'Brief missed approach in detail; review OEI missed approach procedure')
+    if s.get('oei_ma_brief'):        add(2, 'Engine-out go-around requires dedicated crew briefing')
+
+    # Block 3 — Runway
+    if s.get('rwy_w') == 'narrow':   add(3, 'Narrow runway (< 30 m width)', 'Confirm crosswind and ground handling limits for narrow strip')
+    elif s.get('rwy_w') == 'medium': add(1, 'Reduced runway width (30–44 m)')
+    if s.get('rwy_marg'):  add(2, 'Marginal runway length for planned operation', 'Compute T/O and landing performance with actual conditions; confirm stop margins')
+    if s.get('phys_comp'): add(2, 'Physical runway complexity (slope / displaced threshold / offset LOC)')
+
+    # Block 4 — OEI
+    if s.get('oei_sid'):   add(3, 'Special engine-out SID required', 'Complete OEI SID analysis; brief engine failure procedure specific to this departure')
+    if s.get('oei_grad'):  add(2, 'Demanding OEI climb gradient — obstacle clearance critical', 'Review obstacle clearance margins with expected TOW and actual conditions')
+    if s.get('perf_lim'):  add(1, 'Performance-limited departure likely', 'Review WAT/CLG limits; consider derate or weight restriction')
+
+    # Block 5 — Weather
+    if s.get('lvp') == 'sometimes': add(1, 'Occasional LVP / low ceiling conditions')
+    if s.get('lvp') == 'frequent':  add(2, 'Frequent LVP / fog / low visibility at this aerodrome', 'Monitor aerodrome forecast closely; verify LVP procedures and published minima')
+    if s.get('xw_risk'):  add(2, 'Crosswind / windshear / contamination exposure', 'Review crosswind component limits; brief windshear escape if applicable')
+    if s.get('terr_hh'):  add(2, 'Significant terrain / mountain wave / hot-high environment', 'Review terrain awareness procedures; compute performance for hot/high conditions')
+
+    # Block 6 — ATC
+    if s.get('atc') == 'moderate':   add(1, 'Moderate ATC / taxi routing complexity')
+    if s.get('atc') == 'significant': add(2, 'Significant ATC / slot / sequencing complexity', 'Allow extra time margins for clearances; pre-brief complex taxi routing')
+    if s.get('mil_traff'): add(2, 'Military / mixed traffic or unusual ATC phraseology', 'Review local ATC procedures and non-standard phraseology before flight')
+
+    # Block 7 — Security / Oversight (weighted 3–4 pts)
+    if s.get('pol_risk') == 'caution':     add(3, 'Political / security caution advisories in effect', 'Obtain current security briefing; review crew emergency protocols for this region')
+    if s.get('arpt_sec') == 'uncertain':   add(3, 'Airport security / handling standards uncertain', 'Coordinate with local handler for enhanced security measures')
+    if s.get('arpt_sec') == 'poor':        add(4, 'Poor airport security / handling standards', 'Consult security team; consider enhanced ground security measures')
+    if s.get('st_oversight') == 'partial': add(2, 'Partial state safety oversight / ICAO compliance concerns')
+    if s.get('st_oversight') == 'no':      add(4, 'Inadequate or unrecognised state safety oversight', 'Verify company OM requirements; obtain all available safety bulletins')
+
+    # Block 8 — Alternate / Operational
+    if s.get('alt') == 'limited': add(2, 'Limited alternate options within fuel planning range', 'Identify extended-range alternates; plan additional contingency fuel')
+    if s.get('alt') == 'no':      add(3, 'No adequate alternate within fuel planning range', 'Reassess dispatch planning; carry contingency fuel per OM; notify OCC')
+    if s.get('fuel') == 'uncertain': add(1, 'Fuel / ground handling reliability uncertain', 'Confirm fuel uplift availability minimum 48 h before departure')
+    if s.get('fuel') == 'poor':      add(2, 'Poor fuel or ground handling standards', 'Arrange fuel from alternative source; coordinate closely with handler')
+    if not s.get('crew_rec'):        add(1, 'No recent crew experience at this aerodrome (< 12 months)', 'Brief aerodrome-specific material; consider simulator or CBT refresher')
+
+    # Final determination
+    unique_drivers = list(dict.fromkeys(filter(None, drivers)))
+    unique_actions = list(dict.fromkeys(filter(None, actions)))
+
+    if override_high:
+        risk = 'HIGH'
+        basis = override_reasons
+    elif score >= 10:
+        risk = 'HIGH'
+        basis = [f'Weighted risk score: {score} (threshold ≥ 10)'] + override_reasons
+    elif override_medium or score >= 5:
+        risk = 'MEDIUM'
+        if override_medium:
+            basis = override_reasons + ([f'Score: {score}'] if score else [])
+        else:
+            basis = [f'Weighted risk score: {score} (threshold ≥ 5)']
+    else:
+        risk = 'LOW'
+        basis = [f'Weighted risk score: {score} (threshold < 5)']
+
+    return {'risk': risk, 'score': score, 'basis': basis,
+            'drivers': unique_drivers, 'actions': unique_actions}
+
+
+def gen_summary_items(s):
+    items = []
+    if s.get('cat'):              items.append(f"CAT {s['cat']} aerodrome")
+    if s.get('sp_desig'):         items.append("Special aerodrome designation — operator procedures apply")
+    if s.get('sp_crew'):          items.append("Special crew qualification required")
+    if s.get('sp_approval'):      items.append("Special operator approval required for this destination")
+    if not s.get('prec'):         items.append("No precision approach available — non-precision only")
+    elif s.get('prec'):           items.append("Precision approach (ILS / GLS / RNP AR) available")
+    if s.get('angle') == 'steep':    items.append("Steep approach required — angle ≥ 4.5°")
+    elif s.get('angle') == 'moderate': items.append("Elevated approach angle — 3.9° to 4.49°")
+    if s.get('high_da'):          items.append("Terrain-limited approach minima — DA/DH ≥ 400 ft")
+    if s.get('offset'):           items.append("Offset localizer / offset approach procedure in use")
+    if s.get('madem'):            items.append("Demanding missed approach gradient — special briefing required")
+    if s.get('oei_ma_brief'):     items.append("Engine-out go-around procedure requires dedicated pre-flight briefing")
+    if s.get('rwy_w') == 'narrow':   items.append("Narrow runway — width less than 30 m")
+    elif s.get('rwy_w') == 'medium': items.append("Reduced runway width — 30 to 44 m")
+    if s.get('rwy_marg'):         items.append("Marginal runway length — performance check mandatory")
+    if s.get('phys_comp'):        items.append("Physical runway complexity — slope / displaced threshold / offset LOC")
+    if s.get('oei_sid'):          items.append("Special engine-out SID / OEI analysis required for departure")
+    if s.get('oei_grad'):         items.append("Demanding OEI climb gradient — obstacle clearance critical")
+    if s.get('perf_lim'):         items.append("Performance-limited departure likely")
+    if s.get('lvp') == 'frequent':   items.append("Frequent LVP / fog / low visibility — monitor forecast carefully")
+    elif s.get('lvp') == 'sometimes': items.append("Occasional LVP or low ceiling conditions possible")
+    if s.get('xw_risk'):          items.append("Crosswind / windshear / contamination risk — monitor conditions")
+    if s.get('terr_hh'):          items.append("Significant terrain / mountain wave / hot-high environment")
+    if s.get('atc') == 'significant': items.append("Significant ATC / sequencing complexity — extra time margins required")
+    elif s.get('atc') == 'moderate': items.append("Moderate ATC / taxi routing complexity")
+    if s.get('mil_traff'):        items.append("Military / mixed traffic or non-standard ATC phraseology in use")
+    if s.get('pol_risk') == 'high':    items.append("HIGH political / security risk — enhanced crew protocols mandatory")
+    elif s.get('pol_risk') == 'caution': items.append("Political / security caution advisories in effect")
+    if s.get('arpt_sec') == 'poor':    items.append("Poor airport security / handling — enhanced coordination required")
+    elif s.get('arpt_sec') == 'uncertain': items.append("Airport security / handling standards uncertain")
+    if s.get('st_oversight') == 'no':  items.append("Inadequate state safety oversight — OM compliance check required")
+    elif s.get('st_oversight') == 'partial': items.append("Partial state safety oversight — awareness required")
+    if s.get('alt') == 'no':      items.append("No adequate alternate within fuel range — contingency planning required")
+    elif s.get('alt') == 'limited': items.append("Limited alternate options — extended alternate identification required")
+    if s.get('fuel') == 'poor':   items.append("Poor fuel / ground handling — alternative sourcing recommended")
+    elif s.get('fuel') == 'uncertain': items.append("Fuel availability uncertain — confirm 48 h before departure")
+    if not s.get('crew_rec'):      items.append("No recent crew experience — enhanced pre-flight briefing required")
+    return items
+
+
 # ── Single Page PDF Generator ──────────────────────────────────────────────────
 def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     czib_text = fi.get("czib", "")
@@ -156,9 +309,17 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
 
     RED   = colors.HexColor("#C0392B"); DARK  = colors.HexColor("#111111")
     MID   = colors.HexColor("#1A3A5C"); STEEL = colors.HexColor("#2E5F8A")
-    LIGHT = colors.white;               ALT   = colors.white
-    RISKB = colors.white;               BORD  = colors.HexColor("#888888")
+    LIGHT = colors.white;               BORD  = colors.HexColor("#888888")
     W_    = colors.white
+
+    # Risk colour
+    ra_risk = airport.get('ra_risk_level', '')
+    if ra_risk == 'HIGH' or (risk and risk.get('risk_level') == 'HIGH'):
+        RISKBG = colors.HexColor("#FADBD8"); RISKBORDER = colors.HexColor("#C0392B")
+    elif ra_risk == 'MEDIUM' or (risk and risk.get('risk_level') == 'MEDIUM'):
+        RISKBG = colors.HexColor("#FEF9E7"); RISKBORDER = colors.HexColor("#D4AC0D")
+    else:
+        RISKBG = colors.HexColor("#EAFAF1"); RISKBORDER = colors.HexColor("#1E8449")
 
     PW, PH = A4; ML = 15 * mm; W = PW - 2 * ML
     y = PH - 12 * mm
@@ -192,10 +353,10 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
         bx(ML, yt, W, h, fill=STEEL, stroke=STEEL, sw=0.8)
         tx(lbl, ML + 4, yt - h + 3, FB, 8, W_); return yt - h
 
-    def tblk(yt, text, bg=LIGHT, pad=6):
+    def tblk(yt, text, bg=LIGHT, pad=6, border_color=BORD, border_sw=0.5):
         lines = text.split("\n") if text else ["N/A"]
         lh = 11; h = max(len(lines) * lh + pad * 2, 20)
-        bx(ML, yt, W, h, fill=bg, stroke=BORD)
+        bx(ML, yt, W, h, fill=bg, stroke=border_color, sw=border_sw)
         ty2 = yt - pad - 8
         for ln in lines:
             sub = wl(ln, FN, 8, W - pad * 2)
@@ -280,7 +441,7 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
         (f"cb_instrument_{icao_key}", "Instrument Approach and Hold Procedures"),
         (f"cb_minima_{icao_key}",     "Operating Minima"),
     ]):
-        y = cbrow(y, nm, lbl, bg=LIGHT if i % 2 == 0 else ALT)
+        y = cbrow(y, nm, lbl, bg=LIGHT if i % 2 == 0 else colors.HexColor("#FAFAFA"))
     y -= 3
 
     y = shdr(y, "SPECIAL ITEMS BRIEFED DUE TO AERODROME CATEGORY")
@@ -291,30 +452,59 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
         (f"sp_4_{icao_key}", "(4) Other relevant considerations: obstructions, physical layout, lighting etc."),
         (f"sp_5_{icao_key}", "(5) Category C aerodromes: additional considerations for approach/landing/take-off."),
     ]):
-        y = cbrow(y, nm, lbl, bg=LIGHT if i % 2 == 0 else ALT)
+        y = cbrow(y, nm, lbl, bg=LIGHT if i % 2 == 0 else colors.HexColor("#FAFAFA"))
     y -= 3
 
-    y = shdr(y, "SPECIAL REMARKS  -  PPS BRIEFING  (AUTO FROM DATABASE)")
-    for lbl, key in [
-        ("SECTION 1  -  Traffic / ATC / Taxi / Runway Ops", "section1"),
-        ("SECTION 2  -  Meteorology / Wind",                "section2"),
-        ("SECTION 3  -  Security / Handling / Navigation",  "section3"),
-    ]:
-        y = sbhdr(y, lbl); y = tblk(y, airport.get(key, "N/A")); y -= 2
-    y -= 3
+    # ── SUMMARY (single merged block) ─────────────────────────────────────────
+    y = shdr(y, "SPECIAL REMARKS  –  AERODROME BRIEFING  (AUTO FROM DATABASE)")
 
-    y = shdr(y, "AERODROME RISK SUMMARY  (AUTO - DATABASE)")
-    rt = (
-        f"RISK LEVEL: {risk['risk_level']}   |   CAT: {airport.get('category','')}   |   {risk['ops_approval']}\n"
-        f"MITIGATION: {risk['mitigation']}"
-        if risk else "Risk verisi bulunamadi."
-    )
-    y = tblk(y, rt, bg=RISKB, pad=8); y -= 3
+    # Collect summary content: prefer new ra_briefing_items, fallback to section1/2/3
+    ra_items = airport.get('ra_briefing_items', [])
+    if ra_items:
+        summary_text = "\n".join(f"• {item}" for item in ra_items)
+    else:
+        parts = []
+        for key in ['section1', 'section2', 'section3']:
+            val = (airport.get(key) or '').strip()
+            if val and val.upper() != 'N/A':
+                parts.append(val)
+        summary_text = "\n".join(parts) if parts else "N/A"
+
+    y = tblk(y, summary_text); y -= 3
+
+    # ── AERODROME RISK ASSESSMENT (auto) ──────────────────────────────────────
+    ra_risk_lvl = airport.get('ra_risk_level', '')
+    ra_score    = airport.get('ra_risk_score', '')
+    ra_date     = airport.get('ra_assessment_date', '')
+    ra_due      = airport.get('ra_reassessment_due', '')
+    ra_by       = airport.get('ra_assessed_by', '')
+    ra_drivers  = airport.get('ra_key_drivers', [])
+    ra_basis    = airport.get('ra_risk_basis', [])
+
+    if ra_risk_lvl:
+        y = shdr(y, "AERODROME RISK ASSESSMENT  (AUTO – DATABASE)")
+        lines = [f"RISK LEVEL: {ra_risk_lvl}   |   CAT: {airport.get('category','')}   |   Score: {ra_score}"]
+        if ra_date:
+            lines.append(f"Assessment: {ra_date}   |   Reassessment due: {ra_due}   |   By: {ra_by}")
+        for b in ra_basis:
+            lines.append(f"  {b}")
+        if ra_drivers:
+            lines.append("Key Drivers:")
+            for d in ra_drivers[:4]:
+                lines.append(f"  - {d}")
+        y = tblk(y, "\n".join(lines), bg=RISKBG, border_color=RISKBORDER, border_sw=1.2, pad=8)
+        y -= 3
+    elif risk:
+        y = shdr(y, "AERODROME RISK ASSESSMENT  (AUTO – DATABASE)")
+        rt = (
+            f"RISK LEVEL: {risk['risk_level']}   |   CAT: {airport.get('category','')}   |   {risk['ops_approval']}\n"
+            f"MITIGATION: {risk['mitigation']}"
+        )
+        y = tblk(y, rt, bg=RISKBG, pad=8); y -= 3
 
     if czib_text:
         cz_h = 22
-        bx(ML, y, W, cz_h, fill=colors.HexColor("#FADBD8"),
-           stroke=colors.HexColor("#C0392B"), sw=1.5)
+        bx(ML, y, W, cz_h, fill=colors.HexColor("#FADBD8"), stroke=colors.HexColor("#C0392B"), sw=1.5)
         tx(f"  ⚠  {czib_text}", ML + 6, y - cz_h + 6, FB, 9, colors.HexColor("#C0392B"))
         y -= cz_h + 3
 
@@ -340,7 +530,7 @@ def generate_booklet_pdf(airport_list, airports_db, risks_db, fi):
     from reportlab.lib.pagesizes import A4
     buf = io.BytesIO()
     cv = C.Canvas(buf, pagesize=A4)
-    cv.setTitle(f"RAQ-BOOKLET-{fi.get('date','')}")
+    cv.setTitle(f"FBAT-BOOKLET-{fi.get('date','')}")
     frm = cv.acroForm
     for label, icao in airport_list:
         airport = airports_db[icao]; risk = risks_db.get(icao)
@@ -355,18 +545,18 @@ def generate_booklet_pdf(airport_list, airports_db, risks_db, fi):
 # ── Load DB ────────────────────────────────────────────────────────────────────
 airports, risks = load_db()
 
-# ── MAIN HEADER ────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN HEADER
+# ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
-<div style="background:#1A3A5C;padding:18px 24px;border-radius:8px;margin-bottom:20px">
-<h1 style="color:white;margin:0;font-size:22px">✈ RAQ Form Generator</h1>
-<p style="color:#AED6F1;margin:4px 0 0 0;font-size:12px">Route and Aerodrome Qualification Training Form</p>
+<div style="background:#1A3A5C;padding:18px 24px;border-radius:8px;margin-bottom:24px">
+<h1 style="color:white;margin:0;font-size:22px;letter-spacing:0.3px">✈ Flight Briefing and Awareness Tool</h1>
 </div>
 """, unsafe_allow_html=True)
 
-# ── AIRPORT INPUTS ─────────────────────────────────────────────────────────────
-st.subheader("🛫 Meydan Bilgileri")
-st.caption("En az 1, en fazla 4 meydan girebilirsiniz. Boş bırakılan meydanlar PDF'e dahil edilmez.")
-
+# ══════════════════════════════════════════════════════════════════════════════
+# AIRPORT INPUTS
+# ══════════════════════════════════════════════════════════════════════════════
 airport_fields = [
     ("DEPT",     "Kalkış Meydanı",    "LTBA"),
     ("DEPT ALT", "Kalkış Alternatif", "LTFM"),
@@ -389,25 +579,30 @@ for i, (label, desc, placeholder) in enumerate(airport_fields):
 
         if icao_val:
             if icao_val in airports:
-                ap = airports[icao_val]; rk = risks.get(icao_val)
+                ap = airports[icao_val]
+                rk = ap.get('ra_risk_level') or (risks.get(icao_val, {}).get('risk_level') if risks.get(icao_val) else None)
+                risk_html = ""
+                if rk == 'HIGH':
+                    risk_html = f'<div class="risk-box-high"><p>⚠ AERODROME RISK: HIGH</p></div>'
+                elif rk == 'MEDIUM':
+                    risk_html = f'<div class="risk-box-med"><p>⚡ AERODROME RISK: MEDIUM</p></div>'
+                elif rk == 'LOW':
+                    risk_html = f'<div class="risk-box-low"><p>✔ AERODROME RISK: LOW</p></div>'
                 st.markdown(
                     f'<div class="info-card" style="padding:8px 14px;margin:4px 0">'
                     f'<h3 style="font-size:13px">✔ {ap["name"]}</h3>'
-                    f'<p>Kategori: {ap["category"]}</p></div>',
+                    f'<p>Kategori: {ap["category"]}</p></div>'
+                    f'{risk_html}',
                     unsafe_allow_html=True,
                 )
-                if rk:
-                    st.markdown(
-                        f'<div class="risk-box"><p>RISK: {rk["risk_level"]}  |  {rk["ops_approval"]}</p></div>',
-                        unsafe_allow_html=True,
-                    )
             elif len(icao_val) == 4:
                 st.error(f"❌ {icao_val} veritabanında bulunamadı.")
 
 st.divider()
 
-# ── FLIGHT INFO ────────────────────────────────────────────────────────────────
-st.subheader("✈ Uçuş Bilgileri")
+# ══════════════════════════════════════════════════════════════════════════════
+# FLIGHT INFO
+# ══════════════════════════════════════════════════════════════════════════════
 pilots = load_pilots()
 pilot_names = get_pilot_names(pilots)
 
@@ -435,7 +630,9 @@ with col2:
 
 st.divider()
 
-# ── GENERATE ───────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# GENERATE
+# ══════════════════════════════════════════════════════════════════════════════
 valid_airports = [(lbl, icao) for lbl, icao in icao_inputs.items() if icao and icao in airports]
 
 if valid_airports:
@@ -459,49 +656,38 @@ if st.button("📄  RAQ BOOKLET PDF OLUŞTUR", use_container_width=True, type="p
 
                 pdf = generate_booklet_pdf(
                     valid_airports, airports, risks,
-                    {"date": date.strftime("%Y-%m-%d"), "ac_type": ac,
-                     "pic": pic, "sic": sic},
+                    {"date": date.strftime("%Y-%m-%d"), "ac_type": ac, "pic": pic, "sic": sic},
                 )
 
                 icao_str = "-".join([icao for _, icao in valid_airports])
-                fname = f"RAQ_BOOKLET_{icao_str}_{date.strftime('%Y-%m-%d')}.pdf"
+                fname = f"FBAT_{icao_str}_{date.strftime('%Y-%m-%d')}.pdf"
                 st.success(f"✔ {len(valid_airports)} sayfalık booklet hazır!")
                 st.download_button(
                     f"⬇  PDF Booklet İndir ({len(valid_airports)} sayfa)",
                     pdf, fname, "application/pdf", use_container_width=True,
                 )
 
-                # Mail gönder - PIC
                 pilot_obj = find_pilot(pilots, pic)
                 if pilot_obj:
-                    ok, msg_result = send_email(
-                        pilot_obj["email"], pic,
-                        valid_airports, date.strftime("%Y-%m-%d"), ac,
-                    )
-                    if ok:
-                        st.success(f"📧 Mail gönderildi → {pilot_obj['email']}")
-                    else:
-                        st.warning(f"⚠ Mail gönderilemedi: {msg_result}")
+                    ok, msg_result = send_email(pilot_obj["email"], pic, valid_airports, date.strftime("%Y-%m-%d"), ac)
+                    if ok: st.success(f"📧 Mail gönderildi → {pilot_obj['email']}")
+                    else:  st.warning(f"⚠ Mail gönderilemedi: {msg_result}")
 
-                # Mail gönder - SIC
                 if sic:
                     sic_obj = find_pilot(pilots, sic)
                     if sic_obj:
-                        ok, msg_result = send_email(
-                            sic_obj["email"], sic,
-                            valid_airports, date.strftime("%Y-%m-%d"), ac,
-                        )
-                        if ok:
-                            st.success(f"📧 Mail gönderildi → {sic_obj['email']}")
-                        else:
-                            st.warning(f"⚠ SIC maili gönderilemedi: {msg_result}")
+                        ok, msg_result = send_email(sic_obj["email"], sic, valid_airports, date.strftime("%Y-%m-%d"), ac)
+                        if ok: st.success(f"📧 Mail gönderildi → {sic_obj['email']}")
+                        else:  st.warning(f"⚠ SIC maili gönderilemedi: {msg_result}")
 
             except Exception as e:
                 st.error(f"Hata: {e}")
 
-st.caption("© RAQ Form Generator  -  AMC1 ORO.FC.105 b(2);c")
+st.caption("© Flight Briefing and Awareness Tool  –  AMC1 ORO.FC.105 b(2);c")
 
-# ── ADMIN PANEL (sayfa sonu) ───────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# ADMIN PANEL
+# ══════════════════════════════════════════════════════════════════════════════
 if "admin_authenticated" not in st.session_state:
     st.session_state["admin_authenticated"] = False
 
@@ -522,53 +708,273 @@ with st.expander("⚙", expanded=False):
 
         tab1, tab2 = st.tabs(["✈ Meydan", "👤 Pilotlar"])
 
+        # ── TAB 1: MEYDAN ──────────────────────────────────────────────────
         with tab1:
-            st.markdown("**Meydan Düzenle / Ekle**")
+            # ── ICAO SELECTION ──
             col_icao, col_btn = st.columns([2, 1])
             with col_icao:
-                icao_e = st.text_input("ICAO Kodu", max_chars=4,
-                                       placeholder="LTFM", key="ei").upper().strip()
+                icao_e = st.text_input("ICAO Kodu", max_chars=4, placeholder="LTFM", key="ei").upper().strip()
             with col_btn:
                 st.markdown("<br>", unsafe_allow_html=True)
                 load_btn = st.button("📂 Yükle", use_container_width=True)
 
             if load_btn and icao_e:
                 ap_data = airports.get(icao_e, {})
-                st.session_state["edit_name"] = ap_data.get("name", "")
-                st.session_state["edit_cat"]  = ap_data.get("category", "A")
-                st.session_state["edit_s1"]   = ap_data.get("section1", "")
-                st.session_state["edit_s2"]   = ap_data.get("section2", "")
-                st.session_state["edit_s3"]   = ap_data.get("section3", "")
-                if ap_data:
-                    st.success(f"✔ {icao_e} yüklendi.")
+                # Load summary: prefer ra_briefing_items, else merge sections
+                if ap_data.get('ra_briefing_items'):
+                    loaded_summary = "\n".join(ap_data['ra_briefing_items'])
                 else:
-                    st.info(f"ℹ {icao_e} yeni meydan — kutular boş.")
+                    parts = [ap_data.get('section1',''), ap_data.get('section2',''), ap_data.get('section3','')]
+                    loaded_summary = "\n".join(p for p in parts if p and p.upper() != 'N/A')
+                st.session_state["edit_name"]    = ap_data.get("name", "")
+                st.session_state["edit_cat"]     = ap_data.get("category", "A")
+                st.session_state["edit_summary"] = loaded_summary
+                if ap_data: st.success(f"✔ {icao_e} yüklendi — {ap_data.get('name','')}")
+                else:       st.info(f"ℹ {icao_e} yeni meydan.")
 
             name_e = st.text_input("Meydan Adı", key="edit_name")
-            cat_e  = st.selectbox("Kategori", ["A", "B", "C"],
-                                   index=["A","B","C"].index(
-                                       st.session_state.get("edit_cat","A"))
+            cat_e  = st.selectbox("Kategori", ["A","B","C"],
+                                   index=["A","B","C"].index(st.session_state.get("edit_cat","A"))
                                    if st.session_state.get("edit_cat","A") in ["A","B","C"] else 0)
-            s1_e = st.text_area("Section 1", key="edit_s1", height=100)
-            s2_e = st.text_area("Section 2", key="edit_s2", height=80)
-            s3_e = st.text_area("Section 3", key="edit_s3", height=80)
 
-            if st.button("💾 Kaydet", use_container_width=True, key="save_ap"):
-                if icao_e:
-                    ok = update_airport(icao_e, {"name": name_e, "category": cat_e,
-                                                 "section1": s1_e, "section2": s2_e,
-                                                 "section3": s3_e})
-                    if ok:
-                        st.success(f"✔ {icao_e} kaydedildi!")
-                        st.cache_data.clear()
-                        airports, risks = load_db()
+            st.divider()
+
+            # ── MODE SELECTION ──────────────────────────────────────────────
+            admin_mode = st.radio(
+                "İşlem seçin:",
+                ["📋  Summary Database Update", "🎯  Risk Assessment Tool"],
+                horizontal=True, key="admin_mode"
+            )
+
+            # ══════════════════════════════════════════════════════════════
+            # OPTION 1 — SUMMARY DATABASE UPDATE
+            # ══════════════════════════════════════════════════════════════
+            if "Summary" in admin_mode:
+                st.markdown('<div class="ra-block"><h4>📋 Summary / Briefing Notları</h4></div>', unsafe_allow_html=True)
+                summary_e = st.text_area(
+                    "Özet (her satır ayrı madde olarak PDF'e işlenir)",
+                    key="edit_summary", height=200,
+                    placeholder="Non-precision approach only (RNAV/VOR)\nOEI SID gerekli – Departure Runway 09R\nPolitical caution advisory in effect..."
+                )
+
+                if st.button("💾 Kaydet", use_container_width=True, key="save_summary"):
+                    if icao_e:
+                        lines = [l.strip() for l in summary_e.split("\n") if l.strip()]
+                        ok = update_airport(icao_e, {
+                            "name": name_e,
+                            "category": cat_e,
+                            "section1": summary_e,
+                            "section2": "",
+                            "section3": "",
+                            "ra_briefing_items": lines,
+                        })
+                        if ok:
+                            st.success(f"✔ {icao_e} kaydedildi!")
+                            st.cache_data.clear()
+                            airports, risks = load_db()
+                    else:
+                        st.warning("ICAO girin.")
+
+            # ══════════════════════════════════════════════════════════════
+            # OPTION 2 — RISK ASSESSMENT TOOL
+            # ══════════════════════════════════════════════════════════════
+            else:
+                if not icao_e:
+                    st.info("ℹ Yukarıdan ICAO kodunu girin ve Yükle'ye tıklayın.")
                 else:
-                    st.warning("ICAO girin.")
+                    assessed_by = st.text_input("Değerlendiren (isim / callsign)", key="ra_by")
+
+                    st.markdown("---")
+                    st.markdown('<div class="ra-block"><h4>🏛 Block 1 — Aerodrome Classification</h4></div>', unsafe_allow_html=True)
+                    ra_cat = st.selectbox("Aerodrome category?", ["A","B","C"], key="ra_cat",
+                                          help="CAT C → otomatik HIGH override")
+                    c1, c2 = st.columns(2)
+                    ra_sp_desig    = c1.checkbox("Special aerodrome designation applies?", key="ra_spd")
+                    ra_sp_crew     = c2.checkbox("Special crew qualification required?", key="ra_spc")
+                    ra_sp_approval = st.checkbox("Special operator approval required for this destination?", key="ra_spa")
+
+                    st.markdown('<div class="ra-block"><h4>📐 Block 2 — Approach & Procedure</h4></div>', unsafe_allow_html=True)
+                    ra_prec = st.radio("Precision approach (ILS / GLS / RNP AR with GP) available?",
+                                       ["Yes","No"], horizontal=True, key="ra_prec")
+                    ra_angle = st.selectbox("Best available approach angle?",
+                                            ["Normal (< 3.9°)","Elevated (3.9°–4.49°)","Steep (≥ 4.5°) — override risk"],
+                                            key="ra_angle")
+                    ra_high_da = st.checkbox("Precision DA/DH ≥ 400 ft due to terrain-limited minima?", key="ra_hda",
+                                              disabled=(ra_prec == "No"))
+                    c3, c4 = st.columns(2)
+                    ra_offset      = c3.checkbox("Offset localizer / offset approach in use?", key="ra_off")
+                    ra_madem       = c4.checkbox("Missed approach / climb gradient above standard?", key="ra_mad")
+                    ra_oei_ma      = st.checkbox("Engine-out go-around requires dedicated crew briefing?", key="ra_oema")
+
+                    st.markdown('<div class="ra-block"><h4>🛬 Block 3 — Runway & Physical</h4></div>', unsafe_allow_html=True)
+                    ra_rwy_w = st.selectbox("Runway width?", ["≥ 45 m","30–44 m","< 30 m"], key="ra_rwyw")
+                    c5, c6 = st.columns(2)
+                    ra_rwy_marg  = c5.checkbox("Runway length marginal for planned operation?", key="ra_rwym")
+                    ra_phys_comp = c6.checkbox("Physical complexity? (slope / displaced threshold / offset LOC)", key="ra_phc")
+
+                    st.markdown('<div class="ra-block"><h4>⚡ Block 4 — Departure & OEI</h4></div>', unsafe_allow_html=True)
+                    c7, c8, c9 = st.columns(3)
+                    ra_oei_sid  = c7.checkbox("Special OEI SID required?", key="ra_oisid")
+                    ra_oei_grad = c8.checkbox("OEI gradient demanding?", key="ra_oigrad")
+                    ra_perf_lim = c9.checkbox("Performance-limited departure?", key="ra_plim")
+
+                    st.markdown('<div class="ra-block"><h4>🌤 Block 5 — Weather & Environment</h4></div>', unsafe_allow_html=True)
+                    ra_lvp = st.selectbox("Frequency of LVP / fog / low ceiling?",
+                                          ["Rarely / not significant","Occasional","Frequent"],
+                                          key="ra_lvp")
+                    c10, c11 = st.columns(2)
+                    ra_xw_risk = c10.checkbox("Crosswind / windshear / contamination risk significant?", key="ra_xw")
+                    ra_terr_hh = c11.checkbox("Significant terrain / mountain wave / hot-high?", key="ra_thh")
+
+                    st.markdown('<div class="ra-block"><h4>📡 Block 6 — ATC & Operational Complexity</h4></div>', unsafe_allow_html=True)
+                    ra_atc = st.selectbox("ATC / slot / taxi complexity?",
+                                          ["Low / normal","Moderate","Significant"], key="ra_atc")
+                    ra_mil_traff = st.checkbox("Military / mixed traffic or unusual ATC phraseology?", key="ra_mil")
+
+                    st.markdown('<div class="ra-block"><h4>🔐 Block 7 — Security, State & Oversight</h4></div>', unsafe_allow_html=True)
+                    ra_pol_risk = st.selectbox("Political / security risk?",
+                                               ["No significant concern","Caution advisories in effect","High risk — AUTO OVERRIDE HIGH"],
+                                               key="ra_pol")
+                    ra_arpt_sec = st.selectbox("Airport security / handling standards?",
+                                               ["Adequate / reliable","Uncertain / inconsistent","Poor / inadequate"],
+                                               key="ra_sec")
+                    ra_st_oversight = st.selectbox("State safety oversight / ICAO USOAP compliance?",
+                                                    ["Acceptable (EASA or equivalent)","Partial — concerns noted","No / inadequate / unrecognised"],
+                                                    key="ra_usoap")
+
+                    st.markdown('<div class="ra-block"><h4>⛽ Block 8 — Alternate, Fuel & Crew</h4></div>', unsafe_allow_html=True)
+                    ra_alt = st.selectbox("Adequate alternate within fuel planning range?",
+                                          ["Yes — available and suitable","Limited options","No adequate alternate"],
+                                          key="ra_alt")
+                    ra_fuel = st.selectbox("Fuel quality and ground handling reliability?",
+                                           ["Reliable and verified","Uncertain / variable","Poor / known concerns"],
+                                           key="ra_fuel")
+                    ra_crew_rec = st.radio("Crew has operated at this aerodrome within the last 12 months?",
+                                           ["Yes","No"], horizontal=True, key="ra_crec")
+
+                    st.markdown("---")
+
+                    if st.button("🎯  Calculate Risk", use_container_width=True, type="primary", key="ra_calc"):
+                        # Map UI values to engine keys
+                        angle_map = {"Normal (< 3.9°)": "normal", "Elevated (3.9°–4.49°)": "moderate", "Steep (≥ 4.5°) — override risk": "steep"}
+                        rwy_map   = {"≥ 45 m": "wide", "30–44 m": "medium", "< 30 m": "narrow"}
+                        lvp_map   = {"Rarely / not significant": "no", "Occasional": "sometimes", "Frequent": "frequent"}
+                        atc_map   = {"Low / normal": "no", "Moderate": "moderate", "Significant": "significant"}
+                        pol_map   = {"No significant concern": "no", "Caution advisories in effect": "caution", "High risk — AUTO OVERRIDE HIGH": "high"}
+                        sec_map   = {"Adequate / reliable": "good", "Uncertain / inconsistent": "uncertain", "Poor / inadequate": "poor"}
+                        ov_map    = {"Acceptable (EASA or equivalent)": "yes", "Partial — concerns noted": "partial", "No / inadequate / unrecognised": "no"}
+                        alt_map   = {"Yes — available and suitable": "yes", "Limited options": "limited", "No adequate alternate": "no"}
+                        fuel_map  = {"Reliable and verified": "reliable", "Uncertain / variable": "uncertain", "Poor / known concerns": "poor"}
+
+                        survey = {
+                            'cat':         ra_cat,
+                            'sp_desig':    ra_sp_desig,
+                            'sp_crew':     ra_sp_crew,
+                            'sp_approval': ra_sp_approval,
+                            'prec':        ra_prec == "Yes",
+                            'angle':       angle_map[ra_angle],
+                            'high_da':     ra_high_da if ra_prec == "Yes" else False,
+                            'offset':      ra_offset,
+                            'madem':       ra_madem,
+                            'oei_ma_brief':ra_oei_ma,
+                            'rwy_w':       rwy_map[ra_rwy_w],
+                            'rwy_marg':    ra_rwy_marg,
+                            'phys_comp':   ra_phys_comp,
+                            'oei_sid':     ra_oei_sid,
+                            'oei_grad':    ra_oei_grad,
+                            'perf_lim':    ra_perf_lim,
+                            'lvp':         lvp_map[ra_lvp],
+                            'xw_risk':     ra_xw_risk,
+                            'terr_hh':     ra_terr_hh,
+                            'atc':         atc_map[ra_atc],
+                            'mil_traff':   ra_mil_traff,
+                            'pol_risk':    pol_map[ra_pol_risk],
+                            'arpt_sec':    sec_map[ra_arpt_sec],
+                            'st_oversight':ov_map[ra_st_oversight],
+                            'alt':         alt_map[ra_alt],
+                            'fuel':        fuel_map[ra_fuel],
+                            'crew_rec':    ra_crew_rec == "Yes",
+                        }
+
+                        result  = calc_risk(survey)
+                        summary = gen_summary_items(survey)
+                        st.session_state['ra_result']  = result
+                        st.session_state['ra_summary'] = summary
+                        st.session_state['ra_survey']  = survey
+                        st.session_state['ra_icao']    = icao_e
+
+                    # ── RESULT DISPLAY ──────────────────────────────────
+                    if st.session_state.get('ra_result') and st.session_state.get('ra_icao') == icao_e:
+                        result  = st.session_state['ra_result']
+                        summary = st.session_state['ra_summary']
+
+                        risk_colors = {'HIGH': '#FADBD8', 'MEDIUM': '#FEF9E7', 'LOW': '#EAFAF1'}
+                        risk_text_c = {'HIGH': '#C0392B', 'MEDIUM': '#9A7D0A', 'LOW': '#1E8449'}
+                        rl = result['risk']
+                        bg = risk_colors.get(rl, '#F8F9FA')
+                        tc = risk_text_c.get(rl, '#111')
+
+                        st.markdown(f"""
+<div style="background:{bg};border:2px solid {tc};border-radius:8px;padding:14px 18px;margin:12px 0">
+<div style="font-size:11px;font-weight:700;color:{tc};letter-spacing:1px;margin-bottom:8px">AERODROME RISK LEVEL</div>
+<div style="font-size:28px;font-weight:900;color:{tc};font-family:Arial,sans-serif;letter-spacing:2px">{rl}</div>
+<div style="font-size:12px;color:{tc};margin-top:4px">Score: {result['score']}</div>
+</div>""", unsafe_allow_html=True)
+
+                        for b in result['basis']:
+                            st.caption(f"• {b}")
+
+                        if result['drivers']:
+                            with st.expander("🔍 Key Risk Drivers", expanded=True):
+                                for d in result['drivers']:
+                                    st.markdown(f"**▶** {d}")
+
+                        if result['actions']:
+                            with st.expander("✅ Recommended Actions", expanded=True):
+                                for i, a in enumerate(result['actions'], 1):
+                                    st.markdown(f"**{i}.** {a}")
+
+                        if summary:
+                            with st.expander("📄 Briefing Summary (PDF'e işlenecek)", expanded=False):
+                                for item in summary:
+                                    st.markdown(f"• {item}")
+
+                        st.markdown("---")
+                        if st.button("💾 Sonuçları Veritabanına Kaydet", use_container_width=True, type="primary", key="ra_save"):
+                            today_str = datetime.date.today().strftime("%Y-%m-%d")
+                            due_str   = (datetime.date.today().replace(year=datetime.date.today().year + 1)).strftime("%Y-%m-%d")
+                            ok = update_airport(icao_e, {
+                                "name":               name_e or airports.get(icao_e, {}).get("name", icao_e),
+                                "category":           ra_cat,
+                                "section1":           "\n".join(summary),
+                                "section2":           "",
+                                "section3":           "",
+                                "ra_risk_level":      result['risk'],
+                                "ra_risk_score":      result['score'],
+                                "ra_risk_basis":      result['basis'],
+                                "ra_key_drivers":     result['drivers'],
+                                "ra_actions":         result['actions'],
+                                "ra_briefing_items":  summary,
+                                "ra_assessment_date": today_str,
+                                "ra_reassessment_due":due_str,
+                                "ra_assessed_by":     assessed_by or "Admin",
+                            })
+                            if ok:
+                                st.success(f"✔ {icao_e} risk değerlendirmesi kaydedildi! Yeniden değerlendirme: {due_str}")
+                                st.cache_data.clear()
+                                airports, risks = load_db()
+                                # Clear result from session after save
+                                for k in ['ra_result','ra_summary','ra_survey','ra_icao']:
+                                    if k in st.session_state: del st.session_state[k]
+                                st.rerun()
+                            else:
+                                st.error("Kayıt başarısız.")
 
             st.divider()
             if st.button("🔄 Veritabanını Yenile", use_container_width=True):
                 st.cache_data.clear(); st.rerun()
 
+        # ── TAB 2: PILOTLAR ────────────────────────────────────────────────
         with tab2:
             st.markdown("**Kayıtlı Pilotlar**")
             pilots_list = load_pilots()
