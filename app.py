@@ -272,20 +272,19 @@ def calc_risk(s):
 
         # GNSS outage cross-check — RNP/GLS approaches become unreliable
         if s.get('gnss_outage'):
+            # Only RNP AR and GLS are GNSS-dependent. CAT II/III use ILS — not affected.
             gnss_dep_rwys = [
                 rwy for rwy, types in rwy_approaches.items()
-                if any(t in ('Precision CAT III', 'Precision CAT II', 'Precision (ILS/GLS/RNP AR)', 'Offset Precision') for t in types)
+                if any('RNP' in t or 'GLS' in t for t in types)
             ]
             has_ils_backup = any(
-                'Precision (ILS/GLS/RNP AR)' in types or 'Precision CAT II' in types or 'Precision CAT III' in types
+                any(t in ('Precision CAT III', 'Precision CAT II', 'Precision (ILS/GLS/RNP AR)') for t in types)
+                and any('CAT' in t or 'ILS' in t for t in types)
                 for types in rwy_approaches.values()
             )
             if gnss_dep_rwys:
-                add(3, f"GNSS outage — precision approach(es) on RWY {', '.join(gnss_dep_rwys)} may be unreliable (RNP AR / GLS affected)",
-                    'Confirm ILS availability as backup; if no ILS — treat as non-precision only and apply non-precision minima')
-                if not has_ils_backup:
-                    add(2, 'No confirmed ILS backup — GNSS outage leaves only non-precision approaches available',
-                        'Brief non-precision approach technique; apply higher minima; consider alternate if conditions marginal')
+                add(3, f"GNSS outage — RNP AR / GLS approach(es) unreliable on RWY {', '.join(gnss_dep_rwys)} (ILS / CAT II/III unaffected)",
+                    'Use ILS or CAT II/III approach where available; apply non-precision minima if only RNP available')
 
     # Block 8 — Alternate / Operational
     if s.get('alt') == 'limited': add(2, 'Limited alternate options within fuel planning range', 'Identify extended-range alternates; plan additional contingency fuel')
@@ -939,20 +938,14 @@ with st.expander("⚙", expanded=False):
                         help="GNSS outage durumunda RNP AR ve GLS yaklaşmaları güvenilmez hale gelir."
                     )
                     if ra_gnss_outage:
-                        # Check if any runway has GNSS-dependent approach
-                        gnss_dep_rwys = [
-                            rwy for rwy, types in rwy_approaches.items()
-                            if any(t in ("Precision CAT III", "Precision CAT II", "Precision (ILS/GLS/RNP AR)", "Offset Precision") for t in types)
-                            and not any(t == "Precision (ILS/GLS/RNP AR)" for t in types)  # ILS is not GNSS-dependent
-                        ]
-                        # Simpler: warn if any RNP/GLS approach exists
+                        # Only RNP AR and GLS are GNSS-dependent. CAT II/III use ILS — not affected.
                         gnss_affected = [
                             rwy for rwy, types in rwy_approaches.items()
-                            if any("RNP" in t or "GLS" in t or "Precision CAT" in t for t in types)
+                            if any("RNP" in t or "GLS" in t for t in types)
                         ]
                         st.warning(
-                            f"⚠️ GNSS outage aktif — RNP AR / GLS bağımlı yaklaşmalar güvenilmez! "
-                            f"{'Etkilenen pistler: ' + ', '.join(gnss_affected) if gnss_affected else 'ILS tabanlı yaklaşmaları tercih edin.'}"
+                            f"⚠️ GNSS outage aktif — RNP AR / GLS yaklaşmalar güvenilmez! "
+                            f"{'Etkilenen pistler: ' + ', '.join(gnss_affected) if gnss_affected else 'Girilen pistlerde RNP/GLS yok — ILS/CAT II/III etkilenmez.'}"
                         )
 
                     st.markdown('<div class="ra-block"><h4>🛬 Block 3 — Runway & Physical</h4></div>', unsafe_allow_html=True)
