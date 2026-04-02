@@ -193,6 +193,18 @@ def calc_risk(s):
     if not s.get('prec'):            add(2, 'No precision approach available', 'Confirm crew currency on non-precision approach; review technique and minima')
     if s.get('angle') == 'moderate': add(2, 'Elevated approach angle (3.9°–4.49°)')
     if s.get('angle') == 'steep':    add(3, 'Steep approach angle (≥ 4.5°)', 'Brief steep approach technique; verify aircraft certification and performance compliance')
+
+    # MSA scoring
+    msa = s.get('msa_ft', 0)
+    msa_sector = s.get('msa_sector', 'All Sectors')
+    if msa >= 12000:
+        add(3, f'High MSA within TMA: {msa:,} ft ({msa_sector}) — significant terrain environment',
+            'Review terrain awareness procedures; TAWS/GPWS armed; confirm MEA/MORA on all segments')
+    elif msa >= 8000:
+        add(2, f'Elevated MSA within TMA: {msa:,} ft ({msa_sector}) — terrain awareness required',
+            'Verify minimum safe altitudes on all segments; brief terrain avoidance procedures')
+    elif msa >= 5000:
+        add(1, f'Moderate MSA within TMA: {msa:,} ft ({msa_sector})')
     if s.get('high_da'):             add(1, 'Terrain-limited precision minima — DA/DH ≥ 400 ft')
     if s.get('offset'):              add(1, 'Offset localizer / offset approach procedure in use')
     if s.get('madem'):               add(2, 'Demanding missed approach / climb gradient above standard', 'Brief missed approach in detail; review OEI missed approach procedure')
@@ -330,6 +342,8 @@ def gen_summary_items(s):
     elif s.get('prec'):           items.append("Precision approach (ILS / GLS / RNP AR) available")
     if s.get('angle') == 'steep':    items.append("Steep approach required — angle ≥ 4.5°")
     elif s.get('angle') == 'moderate': items.append("Elevated approach angle — 3.9° to 4.49°")
+    if s.get('msa_ft', 0) > 0:
+        items.append(f"Max MSA within TMA: {s['msa_ft']:,} ft — {s.get('msa_sector', 'All Sectors')} sector")
     if s.get('high_da'):          items.append("Terrain-limited approach minima — DA/DH ≥ 400 ft")
     if s.get('offset'):           items.append("Offset localizer / offset approach procedure in use")
     if s.get('madem'):            items.append("Demanding missed approach gradient — special briefing required")
@@ -352,9 +366,27 @@ def gen_summary_items(s):
     elif rc == 'both':            items.append("Runway crossing required for arrival and departure — heightened awareness")
     rwy_approaches = s.get('rwy_approaches', {})
     if rwy_approaches:
+        # Group runways by approach type
+        from collections import defaultdict
+        type_to_rwys = defaultdict(list)
         for rwy, types in rwy_approaches.items():
-            if types:
-                items.append(f"RWY {rwy}: {' / '.join(types)}")
+            for t in types:
+                type_to_rwys[t].append(rwy)
+
+        # Define display order and grouping logic
+        PRECISION_TYPES = ["Precision CAT III", "Precision CAT II", "ILS", "Precision (ILS/GLS/RNP AR)", "Offset Precision"]
+        GNSS_TYPES      = ["RNP AR", "RNP", "GLS"]
+        NONPREC_TYPES   = ["Non-Precision", "Offset Non-Precision"]
+
+        for t in PRECISION_TYPES:
+            if t in type_to_rwys:
+                items.append(f"Precision approach ({t}) — RWY {', '.join(type_to_rwys[t])}")
+        for t in GNSS_TYPES:
+            if t in type_to_rwys:
+                items.append(f"GNSS-based approach ({t}) — RWY {', '.join(type_to_rwys[t])}")
+        for t in NONPREC_TYPES:
+            if t in type_to_rwys:
+                items.append(f"Non-precision approach ({t}) — RWY {', '.join(type_to_rwys[t])}")
     if s.get('gnss_outage'):
         items.append("⚠ GNSS outage / GPS NOTAM in effect — RNP AR / GLS approaches unreliable; confirm ILS availability")
     if s.get('atc') == 'significant': items.append("Significant ATC / sequencing complexity — extra time margins required")
@@ -911,6 +943,14 @@ with st.expander("⚙", expanded=False):
                     ra_angle = st.selectbox("Best available approach angle?",
                                             ["Normal (< 3.9°)","Elevated (3.9°–4.49°)","Steep (≥ 4.5°) — override risk"],
                                             key="ra_angle")
+
+                    st.caption("**Minimum Safe Altitude (MSA)**")
+                    msa_col1, msa_col2 = st.columns([1, 2])
+                    ra_msa_ft = msa_col1.number_input("Max MSA within TMA (ft)", min_value=0, max_value=30000,
+                                                       step=100, value=0, key="ra_msa_ft")
+                    ra_msa_sector = msa_col2.selectbox("Sector",
+                                                        ["All Sectors", "N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+                                                        key="ra_msa_sector")
                     ra_high_da = st.checkbox("Precision DA/DH ≥ 400 ft due to terrain-limited minima?", key="ra_hda",
                                               disabled=(ra_prec == "No"))
                     if ra_high_da and active_runways:
@@ -1034,6 +1074,8 @@ with st.expander("⚙", expanded=False):
                             'sp_approval':   ra_sp_approval,
                             'prec':          ra_prec == "Yes",
                             'angle':         angle_map[ra_angle],
+                            'msa_ft':        ra_msa_ft,
+                            'msa_sector':    ra_msa_sector,
                             'high_da':       ra_high_da if ra_prec == "Yes" else False,
                             'offset':        ra_offset,
                             'madem':         ra_madem,
