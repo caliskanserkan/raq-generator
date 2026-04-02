@@ -227,12 +227,46 @@ def calc_risk(s):
     if s.get('st_oversight') == 'partial': add(2, 'Partial state safety oversight / ICAO compliance concerns')
     if s.get('st_oversight') == 'no':      add(4, 'Inadequate or unrecognised state safety oversight', 'Verify company OM requirements; obtain all available safety bulletins')
 
+    # Block 4 (extra) — Taxi & Runway Crossing
+    if s.get('taxi_complex'):
+        add(2, 'Complex taxi routing / hot spots identified', 'Study airport chart carefully; brief all hot spot locations and crossing procedures')
+    rc = s.get('rwy_crossing', 'no')
+    if rc in ('after_landing', 'before_departure'):
+        add(1, f"Runway crossing required ({'after landing' if rc == 'after_landing' else 'before departure'})", 'Brief runway crossing procedure; ensure ATC clearance obtained before entering')
+    elif rc == 'both':
+        add(2, 'Runway crossing required for both arrival and departure', 'Brief all runway crossing procedures; heightened situational awareness required')
+
+    # Runway approach capabilities (derived from per-runway data)
+    rwy_approaches = s.get('rwy_approaches', {})
+    if rwy_approaches:
+        has_any_precision   = any('Precision' in v and 'Offset' not in v for vals in rwy_approaches.values() for v in vals)
+        has_offset_prec     = any('Offset Precision' in vals for vals in rwy_approaches.values())
+        has_offset_nonprec  = any('Offset Non-Precision' in vals for vals in rwy_approaches.values())
+        all_non_prec        = all(
+            all(v in ('Non-Precision', 'Offset Non-Precision') for v in vals) if vals else True
+            for vals in rwy_approaches.values()
+        )
+        if all_non_prec and not s.get('prec'):
+            add(1, 'All runways — non-precision approach only (confirmed by runway capability data)')
+        if has_offset_prec:
+            add(1, 'Offset precision approach in use on at least one runway', 'Brief offset ILS/LPV technique; increased go-around awareness required')
+        if has_offset_nonprec:
+            add(1, 'Offset non-precision approach in use on at least one runway', 'Brief offset approach technique; review visual segment carefully')
+
     # Block 8 — Alternate / Operational
     if s.get('alt') == 'limited': add(2, 'Limited alternate options within fuel planning range', 'Identify extended-range alternates; plan additional contingency fuel')
     if s.get('alt') == 'no':      add(3, 'No adequate alternate within fuel planning range', 'Reassess dispatch planning; carry contingency fuel per OM; notify OCC')
     if s.get('fuel') == 'uncertain': add(1, 'Fuel / ground handling reliability uncertain', 'Confirm fuel uplift availability minimum 48 h before departure')
     if s.get('fuel') == 'poor':      add(2, 'Poor fuel or ground handling standards', 'Arrange fuel from alternative source; coordinate closely with handler')
     if not s.get('crew_rec'):        add(1, 'No recent crew experience at this aerodrome (< 12 months)', 'Brief aerodrome-specific material; consider simulator or CBT refresher')
+
+    # Block 8 — Alternate LVP capability
+    if s.get('lvp') == 'frequent':
+        if not s.get('alt_lvp'):
+            add(2, 'Frequent LVP at destination — alternate has no confirmed LVP capability', 'Verify alternate minima carefully; consider CAT-capable alternate')
+        elif s.get('alt_cat') == 'CAT II':
+            add(1, 'Frequent LVP at destination — alternate CAT II capability only', 'Confirm crew and aircraft CAT II certification for alternate; verify minima')
+        # CAT III alternate with frequent LVP → no extra penalty, mitigated
 
     # Final determination
     unique_drivers = list(dict.fromkeys(filter(None, drivers)))
@@ -283,6 +317,17 @@ def gen_summary_items(s):
     elif s.get('lvp') == 'sometimes': items.append("Occasional LVP or low ceiling conditions possible")
     if s.get('xw_risk'):          items.append("Crosswind / windshear / contamination risk — monitor conditions")
     if s.get('terr_hh'):          items.append("Significant terrain / mountain wave / hot-high environment")
+    if s.get('taxi_complex'):     items.append("Complex taxi routing / hot spots — study airport chart before flight")
+    rc = s.get('rwy_crossing', 'no')
+    if rc == 'after_landing':     items.append("Runway crossing required after landing — obtain ATC clearance")
+    elif rc == 'before_departure': items.append("Runway crossing required before departure — obtain ATC clearance")
+    elif rc == 'both':            items.append("Runway crossing required for arrival and departure — heightened awareness")
+    # Runway approach capabilities
+    rwy_approaches = s.get('rwy_approaches', {})
+    if rwy_approaches:
+        for rwy, types in rwy_approaches.items():
+            if types:
+                items.append(f"RWY {rwy}: {' / '.join(types)}")
     if s.get('atc') == 'significant': items.append("Significant ATC / sequencing complexity — extra time margins required")
     elif s.get('atc') == 'moderate': items.append("Moderate ATC / taxi routing complexity")
     if s.get('mil_traff'):        items.append("Military / mixed traffic or non-standard ATC phraseology in use")
@@ -294,6 +339,11 @@ def gen_summary_items(s):
     elif s.get('st_oversight') == 'partial': items.append("Partial state safety oversight — awareness required")
     if s.get('alt') == 'no':      items.append("No adequate alternate within fuel range — contingency planning required")
     elif s.get('alt') == 'limited': items.append("Limited alternate options — extended alternate identification required")
+    if s.get('alt_lvp'):
+        items.append(f"Alternate aerodrome LVP capability: {s.get('alt_cat', 'confirmed')}")
+    else:
+        if s.get('alt') != 'no':
+            items.append("Alternate aerodrome LVP capability: not confirmed")
     if s.get('fuel') == 'poor':   items.append("Poor fuel / ground handling — alternative sourcing recommended")
     elif s.get('fuel') == 'uncertain': items.append("Fuel availability uncertain — confirm 48 h before departure")
     if not s.get('crew_rec'):      items.append("No recent crew experience — enhanced pre-flight briefing required")
@@ -794,6 +844,39 @@ with st.expander("⚙", expanded=False):
                     ra_sp_approval = st.checkbox("Special operator approval required for this destination?", key="ra_spa")
 
                     st.markdown('<div class="ra-block"><h4>📐 Block 2 — Approach & Procedure</h4></div>', unsafe_allow_html=True)
+
+                    # ── Runway designators ──
+                    st.caption("**Pist designatorlarını girin** (örn: 03L, 03R, 21L, 21R)")
+                    if 'ra_rwy_sets' not in st.session_state:
+                        st.session_state['ra_rwy_sets'] = 1
+                    rwy_inputs_all = []
+                    for set_i in range(st.session_state['ra_rwy_sets']):
+                        rc4 = st.columns(4)
+                        for j in range(4):
+                            v = rc4[j].text_input(
+                                f"RWY {set_i*4+j+1}", max_chars=4,
+                                placeholder=["03L","03R","21L","21R"][j] if set_i == 0 else f"RWY{set_i*4+j+1}",
+                                key=f"ra_rwy_{set_i}_{j}"
+                            )
+                            rwy_inputs_all.append(v.upper().strip())
+                    if st.button("➕ Daha fazla pist ekle (4 kutu)", key="ra_add_rwy"):
+                        st.session_state['ra_rwy_sets'] += 1
+                        st.rerun()
+                    active_runways = [r for r in rwy_inputs_all if r]
+
+                    # ── Per-runway approach capabilities ──
+                    rwy_approaches = {}
+                    if active_runways:
+                        st.caption("**Her pist için yaklaşma kapasitesi seçin:**")
+                        for rwy in active_runways:
+                            types = st.multiselect(
+                                f"✈ RWY {rwy} — Approach tipi",
+                                ["Precision", "Non-Precision", "Offset Precision", "Offset Non-Precision"],
+                                key=f"ra_app_{rwy}"
+                            )
+                            rwy_approaches[rwy] = types
+
+                    st.markdown("---")
                     ra_prec = st.radio("Precision approach (ILS / GLS / RNP AR with GP) available?",
                                        ["Yes","No"], horizontal=True, key="ra_prec")
                     ra_angle = st.selectbox("Best available approach angle?",
@@ -801,10 +884,19 @@ with st.expander("⚙", expanded=False):
                                             key="ra_angle")
                     ra_high_da = st.checkbox("Precision DA/DH ≥ 400 ft due to terrain-limited minima?", key="ra_hda",
                                               disabled=(ra_prec == "No"))
+                    if ra_high_da and active_runways:
+                        st.multiselect("↳ Hangi pist(ler)?", active_runways, key="ra_hda_rwys")
+
                     c3, c4 = st.columns(2)
-                    ra_offset      = c3.checkbox("Offset localizer / offset approach in use?", key="ra_off")
-                    ra_madem       = c4.checkbox("Missed approach / climb gradient above standard?", key="ra_mad")
-                    ra_oei_ma      = st.checkbox("Engine-out go-around requires dedicated crew briefing?", key="ra_oema")
+                    ra_offset = c3.checkbox("Offset localizer / offset approach in use?", key="ra_off")
+                    ra_madem  = c4.checkbox("Missed approach / climb gradient above standard?", key="ra_mad")
+                    if ra_offset and active_runways:
+                        st.multiselect("↳ Offset — Hangi pist(ler)?", active_runways, key="ra_off_rwys")
+                    if ra_madem and active_runways:
+                        st.multiselect("↳ Demanding MA — Hangi pist(ler)?", active_runways, key="ra_mad_rwys")
+                    ra_oei_ma = st.checkbox("Engine-out go-around requires dedicated crew briefing?", key="ra_oema")
+                    if ra_oei_ma and active_runways:
+                        st.multiselect("↳ OEI go-around — Hangi pist(ler)?", active_runways, key="ra_oema_rwys")
 
                     st.markdown('<div class="ra-block"><h4>🛬 Block 3 — Runway & Physical</h4></div>', unsafe_allow_html=True)
                     ra_rwy_w = st.selectbox("Runway width?", ["≥ 45 m","30–44 m","< 30 m"], key="ra_rwyw")
@@ -817,6 +909,17 @@ with st.expander("⚙", expanded=False):
                     ra_oei_sid  = c7.checkbox("Special OEI SID required?", key="ra_oisid")
                     ra_oei_grad = c8.checkbox("OEI gradient demanding?", key="ra_oigrad")
                     ra_perf_lim = c9.checkbox("Performance-limited departure?", key="ra_plim")
+                    if ra_oei_sid and active_runways:
+                        st.multiselect("↳ OEI SID — Hangi pist(ler)?", active_runways, key="ra_oisid_rwys")
+                    if ra_oei_grad and active_runways:
+                        st.multiselect("↳ OEI Gradient — Hangi pist(ler)?", active_runways, key="ra_oigrad_rwys")
+                    if ra_perf_lim and active_runways:
+                        st.multiselect("↳ Perf. Limited — Hangi pist(ler)?", active_runways, key="ra_plim_rwys")
+                    c_tx, c_rx = st.columns(2)
+                    ra_taxi_complex = c_tx.checkbox("Taxi routing complex / hot spot exists?", key="ra_taxi")
+                    ra_rwy_crossing = c_rx.selectbox("Runway crossing required?",
+                                                     ["No", "After landing", "Before departure", "Both"],
+                                                     key="ra_rwxing")
 
                     st.markdown('<div class="ra-block"><h4>🌤 Block 5 — Weather & Environment</h4></div>', unsafe_allow_html=True)
                     ra_lvp = st.selectbox("Frequency of LVP / fog / low ceiling?",
@@ -846,6 +949,12 @@ with st.expander("⚙", expanded=False):
                     ra_alt = st.selectbox("Adequate alternate within fuel planning range?",
                                           ["Yes — available and suitable","Limited options","No adequate alternate"],
                                           key="ra_alt")
+                    ra_alt_lvp = False
+                    ra_alt_cat = None
+                    if ra_alt != "No adequate alternate":
+                        ra_alt_lvp = st.checkbox("Alternate aerodrome has low visibility (LVP) capability?", key="ra_alt_lvp")
+                        if ra_alt_lvp:
+                            ra_alt_cat = st.radio("LVP Category?", ["CAT II", "CAT III"], horizontal=True, key="ra_alt_cat")
                     ra_fuel = st.selectbox("Fuel quality and ground handling reliability?",
                                            ["Reliable and verified","Uncertain / variable","Poor / known concerns"],
                                            key="ra_fuel")
@@ -866,34 +975,42 @@ with st.expander("⚙", expanded=False):
                         alt_map   = {"Yes — available and suitable": "yes", "Limited options": "limited", "No adequate alternate": "no"}
                         fuel_map  = {"Reliable and verified": "reliable", "Uncertain / variable": "uncertain", "Poor / known concerns": "poor"}
 
+                        crossing_map = {"No": "no", "After landing": "after_landing",
+                                        "Before departure": "before_departure", "Both": "both"}
                         survey = {
-                            'cat':         ra_cat,
-                            'sp_desig':    ra_sp_desig,
-                            'sp_crew':     ra_sp_crew,
-                            'sp_approval': ra_sp_approval,
-                            'prec':        ra_prec == "Yes",
-                            'angle':       angle_map[ra_angle],
-                            'high_da':     ra_high_da if ra_prec == "Yes" else False,
-                            'offset':      ra_offset,
-                            'madem':       ra_madem,
-                            'oei_ma_brief':ra_oei_ma,
-                            'rwy_w':       rwy_map[ra_rwy_w],
-                            'rwy_marg':    ra_rwy_marg,
-                            'phys_comp':   ra_phys_comp,
-                            'oei_sid':     ra_oei_sid,
-                            'oei_grad':    ra_oei_grad,
-                            'perf_lim':    ra_perf_lim,
-                            'lvp':         lvp_map[ra_lvp],
-                            'xw_risk':     ra_xw_risk,
-                            'terr_hh':     ra_terr_hh,
-                            'atc':         atc_map[ra_atc],
-                            'mil_traff':   ra_mil_traff,
-                            'pol_risk':    pol_map[ra_pol_risk],
-                            'arpt_sec':    sec_map[ra_arpt_sec],
-                            'st_oversight':ov_map[ra_st_oversight],
-                            'alt':         alt_map[ra_alt],
-                            'fuel':        fuel_map[ra_fuel],
-                            'crew_rec':    ra_crew_rec == "Yes",
+                            'cat':           ra_cat,
+                            'sp_desig':      ra_sp_desig,
+                            'sp_crew':       ra_sp_crew,
+                            'sp_approval':   ra_sp_approval,
+                            'prec':          ra_prec == "Yes",
+                            'angle':         angle_map[ra_angle],
+                            'high_da':       ra_high_da if ra_prec == "Yes" else False,
+                            'offset':        ra_offset,
+                            'madem':         ra_madem,
+                            'oei_ma_brief':  ra_oei_ma,
+                            'rwy_approaches': rwy_approaches,
+                            'active_runways': active_runways,
+                            'rwy_w':         rwy_map[ra_rwy_w],
+                            'rwy_marg':      ra_rwy_marg,
+                            'phys_comp':     ra_phys_comp,
+                            'oei_sid':       ra_oei_sid,
+                            'oei_grad':      ra_oei_grad,
+                            'perf_lim':      ra_perf_lim,
+                            'taxi_complex':  ra_taxi_complex,
+                            'rwy_crossing':  crossing_map[ra_rwy_crossing],
+                            'lvp':           lvp_map[ra_lvp],
+                            'xw_risk':       ra_xw_risk,
+                            'terr_hh':       ra_terr_hh,
+                            'atc':           atc_map[ra_atc],
+                            'mil_traff':     ra_mil_traff,
+                            'pol_risk':      pol_map[ra_pol_risk],
+                            'arpt_sec':      sec_map[ra_arpt_sec],
+                            'st_oversight':  ov_map[ra_st_oversight],
+                            'alt':           alt_map[ra_alt],
+                            'alt_lvp':       ra_alt_lvp,
+                            'alt_cat':       ra_alt_cat,
+                            'fuel':          fuel_map[ra_fuel],
+                            'crew_rec':      ra_crew_rec == "Yes",
                         }
 
                         result  = calc_risk(survey)
