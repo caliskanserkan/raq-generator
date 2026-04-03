@@ -597,8 +597,10 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     ML = 15 * mm
     MR = 15 * mm
     W  = PW - ML - MR
-    FN = "Helvetica"
-    FB = "Helvetica-Bold"
+    # Türkçe destekli fontlar — global FN/FB/FI (DejaVuSans) kullanılır
+    _FN = FN  # global'den gelir (DejaVuSans veya Helvetica fallback)
+    _FB = FB
+    _FI = FI if "FI" in dir() else FN if "FI" in dir() else FN
 
     rev_date = datetime.date.today().strftime("%Y-%m-%d")
     y = PH - 10 * mm
@@ -639,19 +641,19 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
 
     def section_hdr(yt, label, h=13):
         bx(ML, yt, W, h, fill=DARK, stroke=DARK, sw=0.8)
-        tx(label, ML + 5, yt - h + 4, FB, 8, WHITE)
+        tx(label, ML + 5, yt - h + 4, _FB, 8, WHITE)
         return yt - h
 
     def text_block(yt, text, bg=WHITE, pad=5, border=MGRAY, bsw=0.5, lh=10, fsize=8):
         raw_lines = (text or "N/A").split("\n")
         wrapped = []
         for ln in raw_lines:
-            wrapped.extend(wraplines(ln, FN, fsize, W - pad * 2))
+            wrapped.extend(wraplines(ln, _FN, fsize, W - pad * 2))
         h = max(len(wrapped) * lh + pad * 2, 16)
         bx(ML, yt, W, h, fill=bg, stroke=border, sw=bsw)
         ty2 = yt - pad - (lh * 0.7)
         for s in wrapped:
-            tx(s, ML + pad, ty2, FN, fsize)
+            tx(s, ML + pad, ty2, _FN, fsize)
             ty2 -= lh
         return yt - h
 
@@ -670,7 +672,7 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
             cv.setLineWidth(1)
             cv.line(cb_x + 1, cb_y + cb_size / 2, cb_x + cb_size / 2 - 1, cb_y + 1)
             cv.line(cb_x + cb_size / 2 - 1, cb_y + 1, cb_x + cb_size + 1, cb_y + cb_size + 2)
-        tx(label, ML + 15, yt - h + 4, FN, 8)
+        tx(label, ML + 15, yt - h + 4, _FN, 8)
         return yt - h
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -680,15 +682,15 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     bx(ML, y, W * 0.72, hh, fill=DARK, stroke=DARK, sw=1)
     bx(ML + W * 0.72, y, W * 0.28, hh, fill=DARK, stroke=DARK, sw=1)
     tx("REC HAVACILIK  \u2192  YOL VE MEYDAN YETERLİLİK EĞİTİM FORMU",
-       ML + 6, y - hh + 7, FB, 9, WHITE)
-    tx("FOP-FRM02", ML + W * 0.72 + 4, y - 7, FB, 7, WHITE)
-    tx(f"Rev: {rev_date}", ML + W * 0.72 + 4, y - hh + 5, FB, 8, RED)
+       ML + 6, y - hh + 7, _FB, 9, WHITE)
+    tx("FOP-FRM02", ML + W * 0.72 + 4, y - 7, _FB, 7, WHITE)
+    tx(f"Rev: {rev_date}", ML + W * 0.72 + 4, y - hh + 5, _FB, 8, RED)
     y -= hh
 
     # subtitle
     bx(ML, y, W, 12, fill=colors.HexColor("#EAF0F6"), stroke=LGRAY, sw=0.4)
     tx("ROUTE AND AERODROME QUALIFICATION TRAINING FORM",
-       ML, y - 12 + 3, FN, 7.5, DARK, align="center", width=W)
+       ML, y - 12 + 3, _FN, 7.5, DARK, align="center", width=W)
     y -= 12
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -707,13 +709,13 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     cx = ML
     for i, (hd, col_w) in enumerate(zip(headers, cols)):
         bx(cx, y, col_w, row_h, fill=colors.HexColor("#D6E4F0"), stroke=LGRAY, sw=0.5)
-        tx(hd, cx, y - row_h + 4, FB, 8, DARK, align="center", width=col_w)
+        tx(hd, cx, y - row_h + 4, _FB, 8, DARK, align="center", width=col_w)
         cx += col_w
     y -= row_h
     cx = ML
     for i, (val, col_w) in enumerate(zip(values, cols)):
         bx(cx, y, col_w, row_h, fill=WHITE, stroke=LGRAY, sw=0.5)
-        tx(val, cx, y - row_h + 4, FB, 8.5, BLACK, align="center", width=col_w)
+        tx(val, cx, y - row_h + 4, _FB, 8.5, BLACK, align="center", width=col_w)
         cx += col_w
     y -= row_h
     y -= 2
@@ -729,7 +731,7 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     cx = ML
     for hd, cw in zip(hdrs2, col_w2):
         bx(cx, y, cw, row_h, fill=colors.HexColor("#D6E4F0"), stroke=LGRAY, sw=0.5)
-        tx(hd, cx, y - row_h + 4, FB, 8, DARK, align="center", width=cw)
+        tx(hd, cx, y - row_h + 4, _FB, 8, DARK, align="center", width=cw)
         cx += cw
     y -= row_h
     # data row
@@ -740,7 +742,7 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     for vi, (val, cw) in enumerate(zip(vals2, col_w2)):
         bx(cx, y, cw, row_h + 2, fill=WHITE, stroke=LGRAY, sw=0.5)
         color = RED if vi == 2 else BLACK
-        tx(val, cx, y - row_h + 2, FB, 9 if vi == 2 else 8.5, color, align="center", width=cw)
+        tx(val, cx, y - row_h + 2, _FB, 9 if vi == 2 else 8.5, color, align="center", width=cw)
         cx += cw
     y -= (row_h + 2)
     y -= 2
@@ -753,8 +755,8 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     fam_h = 18
     bx(ML,        y, half, fam_h, fill=colors.HexColor("#D6E4F0"), stroke=LGRAY, sw=0.5)
     bx(ML + half, y, half, fam_h, fill=colors.HexColor("#D6E4F0"), stroke=LGRAY, sw=0.5)
-    tx("Self Briefing",   ML,        y - fam_h + 6, FB, 8, DARK, align="center", width=half)
-    tx("Local Authority", ML + half, y - fam_h + 6, FB, 8, DARK, align="center", width=half)
+    tx("Self Briefing",   ML,        y - fam_h + 6, _FB, 8, DARK, align="center", width=half)
+    tx("Local Authority", ML + half, y - fam_h + 6, _FB, 8, DARK, align="center", width=half)
     y -= fam_h
     bx(ML,        y, half, fam_h, fill=WHITE, stroke=LGRAY, sw=0.5)
     bx(ML + half, y, half, fam_h, fill=WHITE, stroke=LGRAY, sw=0.5)
@@ -845,8 +847,8 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
             "for the flight in accordance with AMC1 ORO.FC.105 b(2);c and OM PART C.")
     cert_h = 22
     bx(ML, y, W, cert_h, fill=colors.HexColor("#F5F5F5"), stroke=LGRAY, sw=0.5)
-    for wrapped_ln in wraplines(cert, "Helvetica-Oblique", 7.5, W - 10):
-        tx(wrapped_ln, ML + 5, y - 6, "Helvetica-Oblique", 7.5, colors.HexColor("#555555"))
+    for wrapped_ln in wraplines(cert, _FI, 7.5, W - 10):
+        tx(wrapped_ln, ML + 5, y - 6, _FI, 7.5, colors.HexColor("#555555"))
         y -= 9
     y -= (cert_h - 9 + 2)
 
@@ -855,10 +857,10 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     bx(ML,           y, W * 0.25, comp_h, fill=colors.HexColor("#D6E4F0"), stroke=LGRAY, sw=0.5)
     bx(ML + W * 0.25, y, W * 0.50, comp_h, fill=WHITE, stroke=LGRAY, sw=0.5)
     bx(ML + W * 0.75, y, W * 0.25, comp_h, fill=WHITE, stroke=LGRAY, sw=0.5)
-    tx("Completed by:", ML + 4, y - comp_h + 5, FB, 8, DARK)
+    tx("Completed by:", ML + 4, y - comp_h + 5, _FB, 8, DARK)
     pic = fi.get("pic", "").upper()
-    tx(pic, ML + W * 0.25, y - comp_h + 5, FB, 8.5, BLACK, align="center", width=W * 0.50)
-    tx(fi.get("date", ""), ML + W * 0.75, y - comp_h + 5, FN, 8, BLACK, align="center", width=W * 0.25)
+    tx(pic, ML + W * 0.25, y - comp_h + 5, _FB, 8.5, BLACK, align="center", width=W * 0.50)
+    tx(fi.get("date", ""), ML + W * 0.75, y - comp_h + 5, _FN, 8, BLACK, align="center", width=W * 0.25)
     y -= comp_h
 
 
