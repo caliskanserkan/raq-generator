@@ -687,26 +687,25 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     y = tblk(y, survey_block, bg=bg, border_color=bd, border_sw=1.2)
     y -= 3
 
-    y = shdr(y, "LOCAL OPERATIONAL PROCEDURES — OFFICIAL AIP / AOI CHECK")
-    local_lines = [
-        f"Source: {local_ops.get('source_name','Official AIP / AOI')}",
-        f"Reference: {local_ops.get('reference','N/A')}",
-        f"Checked on: {local_ops.get('checked_on','N/A')}",
-        f"Status: {local_ops.get('status','N/A')}",
-    ]
+    # -- Section 1/2/3 tek kutuda
+    s1 = (airport.get('section1') or '').strip()
+    s2 = (airport.get('section2') or '').strip()
+    s3 = (airport.get('section3') or '').strip()
+    combined = "\n".join(p for p in [s1, s2, s3] if p)
+    if combined:
+        y = shdr(y, "AERODROME BRIEFING SUMMARY")
+        y = tblk(y, combined)
+        y -= 3
+
+    # -- AIP/AOI live (sadece konfigureliyse)
     if local_ops.get('items'):
+        y = shdr(y, "LOCAL OPERATIONAL PROCEDURES — AIP / AOI")
+        local_lines = [f"Source: {local_ops.get('source_name','AIP/AOI')}  |  Checked: {local_ops.get('checked_on','')}"]
         for item in local_ops['items'][:6]:
             local_lines.append(f"• {item}")
-    elif local_ops.get('note'):
-        local_lines.append(local_ops['note'])
-    local_lines.append("Published data only. NOTAM not included in this section.")
-    y = tblk(y, "\n".join(local_lines))
-    y -= 3
-
-    if airport.get('ra_briefing_items'):
-        y = shdr(y, "OPERATIONAL BRIEFING SUMMARY")
-        y = tblk(y, "\n".join([f"• {x}" for x in (airport.get('ra_briefing_items') or [])[:10]]))
+        y = tblk(y, "\n".join(local_lines))
         y -= 3
+
 
     if czib_text:
         y = shdr(y, "SECURITY / CZIB")
