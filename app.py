@@ -1114,23 +1114,26 @@ with st.expander("⚙", expanded=False):
 
                 if st.button("💾 Kaydet", use_container_width=True, key="save_summary"):
                     if icao_e:
-                        lines = [l.strip() for l in summary_e.split("\n") if l.strip()]
-                        ok = update_airport(icao_e, {
-                            "name": name_e,
-                            "category": cat_e,
-                            "section1": summary_e,
-                            "section2": "",
-                            "section3": "",
-                            "ra_briefing_items": lines,
-                            "aip_source_name": aip_name,
-                            "aip_source_url": aip_url,
-                            "aip_reference": aip_ref,
-                        })
-                        if ok:
-                            st.success(f"✔ {icao_e} kaydedildi!")
-                            st.cache_data.clear(); airports, risks = load_db()
-                        else:
-                            st.error("Kayıt başarısız.")
+                        try:
+                            lines = [l.strip() for l in summary_e.split("\n") if l.strip()]
+                            # Section1 güncellenir ama section2/3 korunur
+                            payload = {
+                                "category": cat_e,
+                                "ra_briefing_items": lines,
+                            }
+                            if summary_e.strip():
+                                payload["section1"] = summary_e
+                            if aip_name: payload["aip_source_name"] = aip_name
+                            if aip_url:  payload["aip_source_url"]  = aip_url
+                            if aip_ref:  payload["aip_reference"]   = aip_ref
+                            ok = update_airport(icao_e, payload)
+                            if ok:
+                                st.success(f"✔ {icao_e} kaydedildi!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Kayıt başarısız.")
+                        except Exception as _ex:
+                            st.error(f"❌ Hata: {_ex}")
                     else:
                         st.warning("ICAO girin.")
             else:
@@ -1271,40 +1274,50 @@ with st.expander("⚙", expanded=False):
                             'fuel': fuel_map[ra_fuel],
                             'crew_rec': ra_crew_rec == 'Yes',
                         }
-                        result = calc_risk(survey)
-                        summary = gen_summary_items(survey, result)
-                        today_str = datetime.date.today().strftime("%Y-%m-%d")
-                        due_str = (datetime.date.today() + datetime.timedelta(days=28)).strftime("%Y-%m-%d")
-                        # Section 1/2/3 korunur — sadece risk ve meta alanlar güncellenir
-                        update_payload = {
-                            "ra_risk_level": result['risk'],
-                            "ra_risk_score": result['score'],
-                            "ra_risk_basis": result['basis'],
-                            "ra_key_drivers": result['drivers'],
-                            "ra_actions": result['actions'],
-                            "ra_briefing_items": summary,
-                            "ra_assessment_date": today_str,
-                            "ra_reassessment_due": due_str,
-                            "ra_assessed_by": assessed_by or "Admin",
-                            "ra_ops_approval": result.get("ops_approval", "DISPATCH OK"),
-                            "ra_mitigation": "; ".join(result.get("actions", [])[:3]),
-                            "survey_last_updated": today_str,
-                            "survey_updated_by": assessed_by or "Admin",
-                            "category": ra_cat,
-                        }
-                        if aip_name: update_payload["aip_source_name"] = aip_name
-                        if aip_url:  update_payload["aip_source_url"]  = aip_url
-                        if aip_ref:  update_payload["aip_reference"]   = aip_ref
-                        ok = update_airport(icao_e, update_payload)
-                        if ok:
-                            st.success(f"✔ {icao_e} risk assessment saved. AIRAC review due after: {due_str}")
-                            st.cache_data.clear(); airports, risks = load_db(); st.rerun()
-                        else:
-                            st.error("Kayıt başarısız.")
+                        try:
+                            result  = calc_risk(survey)
+                            summary = gen_summary_items(survey, result)
+                            today_str = datetime.date.today().strftime("%Y-%m-%d")
+                            due_str   = (datetime.date.today() + datetime.timedelta(days=28)).strftime("%Y-%m-%d")
+
+                            r_level = result.get('risk', 'LOW')
+                            ops_appr = {"HIGH": "DISPATCH REQUIRES APPROVAL",
+                                        "MEDIUM": "DISPATCH WITH CAUTION"}.get(r_level, "DISPATCH OK")
+
+                            update_payload = {
+                                "ra_risk_level":       r_level,
+                                "ra_risk_score":       result.get('score', 0),
+                                "ra_risk_basis":       result.get('basis', []),
+                                "ra_key_drivers":      result.get('drivers', []),
+                                "ra_actions":          result.get('actions', []),
+                                "ra_briefing_items":   summary,
+                                "ra_assessment_date":  today_str,
+                                "ra_reassessment_due": due_str,
+                                "ra_assessed_by":      assessed_by or "Admin",
+                                "ra_ops_approval":     ops_appr,
+                                "ra_mitigation":       "; ".join(result.get('actions', [])[:3]),
+                                "survey_last_updated": today_str,
+                                "survey_updated_by":   assessed_by or "Admin",
+                                "category":            ra_cat,
+                            }
+                            if aip_name: update_payload["aip_source_name"] = aip_name
+                            if aip_url:  update_payload["aip_source_url"]  = aip_url
+                            if aip_ref:  update_payload["aip_reference"]   = aip_ref
+
+                            ok = update_airport(icao_e, update_payload)
+                            if ok:
+                                st.success(f"✔ {icao_e} kaydedildi! Risk: **{r_level}** | Score: {result.get('score',0)} | Review: {due_str}")
+                                st.rerun()
+                            else:
+                                st.error("❌ DB kayıt başarısız.")
+                        except Exception as _ex:
+                            import traceback as _tb
+                            st.error(f"❌ Hata: {_ex}")
+                            st.code(_tb.format_exc())
 
             st.divider()
             if st.button("🔄 Veritabanını Yenile", use_container_width=True):
-                st.cache_data.clear(); st.rerun()
+                st.rerun()
 
         with tab2:
             st.markdown("**Kayıtlı Pilotlar**")
