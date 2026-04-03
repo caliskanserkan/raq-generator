@@ -579,142 +579,287 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
+    import datetime
 
+    # ── COLOURS ──────────────────────────────────────────────────────────────
+    DARK  = colors.HexColor("#1A3A5C")   # header bg
+    MGRAY = colors.HexColor("#888888")
+    LGRAY = colors.HexColor("#DDDDDD")
+    BLACK = colors.HexColor("#111111")
+    WHITE = colors.white
     RED   = colors.HexColor("#C0392B")
-    DARK  = colors.HexColor("#111111")
-    MID   = colors.HexColor("#1A3A5C")
-    STEEL = colors.HexColor("#2E5F8A")
-    LIGHT = colors.white
-    BORD  = colors.HexColor("#888888")
-    W_    = colors.white
+    GREEN = colors.HexColor("#1E8449")
+    RISKBG_LOW  = colors.HexColor("#EAFAF1")
+    RISKBG_MED  = colors.HexColor("#FEF9E7")
+    RISKBG_HIGH = colors.HexColor("#FADBD8")
 
-    ra_risk = airport.get('ra_risk_level', '')
-    if ra_risk == 'HIGH' or (risk and risk.get('risk') == 'HIGH'):
-        RISKBG = colors.HexColor("#FADBD8"); RISKBORDER = colors.HexColor("#C0392B")
-    elif ra_risk == 'MEDIUM' or (risk and risk.get('risk') == 'MEDIUM'):
-        RISKBG = colors.HexColor("#FEF9E7"); RISKBORDER = colors.HexColor("#D4AC0D")
-    else:
-        RISKBG = colors.HexColor("#EAFAF1"); RISKBORDER = colors.HexColor("#1E8449")
+    PW, PH = A4
+    ML = 15 * mm
+    MR = 15 * mm
+    W  = PW - ML - MR
+    FN = "Helvetica"
+    FB = "Helvetica-Bold"
 
-    PW, PH = A4; ML = 15 * mm; W = PW - 2 * ML
-    y = PH - 12 * mm
+    rev_date = datetime.date.today().strftime("%Y-%m-%d")
+    y = PH - 10 * mm
 
-    local_ops = fi.get("local_ops", {})
-    survey_status = fi.get("survey_status", {})
-    czib_text = fi.get("czib", "")
-
-    def bx(x, yt, w2, h, fill=LIGHT, stroke=BORD, sw=0.5):
-        cv.setLineWidth(sw); cv.setFillColor(fill); cv.setStrokeColor(stroke)
+    # ── helpers ──────────────────────────────────────────────────────────────
+    def bx(x, yt, w2, h, fill=WHITE, stroke=MGRAY, sw=0.5):
+        cv.setLineWidth(sw)
+        cv.setFillColor(fill)
+        cv.setStrokeColor(stroke)
         cv.rect(x, yt - h, w2, h, fill=1, stroke=1)
 
-    def tx(text, x, yt, font=FN, size=9, color=DARK, align="left", width=0):
-        cv.setFillColor(color); cv.setFont(font, size)
-        if align == "center" and width: cv.drawCentredString(x + width / 2, yt, str(text))
-        elif align == "right" and width: cv.drawRightString(x + width, yt, str(text))
-        else: cv.drawString(x, yt, str(text))
-
-    def wl(text, font, size, max_w):
+    def tx(text, x, yt, font=FN, size=8, color=BLACK, align="left", width=0):
+        cv.setFillColor(color)
         cv.setFont(font, size)
-        words = str(text).split(); lines = []; line = ""
-        for w2 in words:
-            test = (line + " " + w2).strip()
+        if align == "center" and width:
+            cv.drawCentredString(x + width / 2, yt, str(text))
+        elif align == "right" and width:
+            cv.drawRightString(x + width, yt, str(text))
+        else:
+            cv.drawString(x, yt, str(text))
+
+    def wraplines(text, font, size, max_w):
+        cv.setFont(font, size)
+        words = str(text).split()
+        lines2 = []
+        line = ""
+        for wd in words:
+            test = (line + " " + wd).strip()
             if cv.stringWidth(test, font, size) <= max_w:
                 line = test
             else:
-                if line: lines.append(line)
-                line = w2
-        if line: lines.append(line)
-        return lines
+                if line:
+                    lines2.append(line)
+                line = wd
+        if line:
+            lines2.append(line)
+        return lines2
 
-    def shdr(yt, lbl, h=14):
-        bx(ML, yt, W, h, fill=MID, stroke=MID, sw=0.8)
-        tx(lbl, ML + 6, yt - h + 4, FB, 8.5, W_)
+    def section_hdr(yt, label, h=13):
+        bx(ML, yt, W, h, fill=DARK, stroke=DARK, sw=0.8)
+        tx(label, ML + 5, yt - h + 4, FB, 8, WHITE)
         return yt - h
 
-    def tblk(yt, text, bg=LIGHT, pad=6, border_color=BORD, border_sw=0.5):
-        lines = text.split("\n") if text else ["N/A"]
+    def text_block(yt, text, bg=WHITE, pad=5, border=MGRAY, bsw=0.5, lh=10, fsize=8):
+        raw_lines = (text or "N/A").split("\n")
         wrapped = []
-        for ln in lines:
-            wrapped.extend(wl(ln, FN, 8, W - pad * 2))
-        lh = 10; h = max(len(wrapped) * lh + pad * 2, 18)
-        bx(ML, yt, W, h, fill=bg, stroke=border_color, sw=border_sw)
-        ty2 = yt - pad - 7
+        for ln in raw_lines:
+            wrapped.extend(wraplines(ln, FN, fsize, W - pad * 2))
+        h = max(len(wrapped) * lh + pad * 2, 16)
+        bx(ML, yt, W, h, fill=bg, stroke=border, sw=bsw)
+        ty2 = yt - pad - (lh * 0.7)
         for s in wrapped:
-            tx(s, ML + pad, ty2, FN, 8)
+            tx(s, ML + pad, ty2, FN, fsize)
             ty2 -= lh
         return yt - h
 
-    hh = 26
-    rev_date = datetime.date.today().strftime("%Y-%m-%d")
-    bx(ML, y, W * .72, hh, fill=MID, stroke=MID, sw=1)
-    bx(ML + W * .72, y, W * .28, hh, fill=MID, stroke=MID, sw=1)
-    tx("REC HAVACILIK  ✈  ROUTE / AERODROME QUALIFICATION BOOKLET", ML + 8, y - hh + 8, FB, 9.5, W_)
-    tx("FOP-FRM02", ML + W * .72 + 4, y - 7, FB, 7, W_)
-    tx(f"Rev: {rev_date}", ML + W * .72 + 4, y - hh + 6, FB, 8, RED)
+    def checkbox_row(yt, label, h=14, checked=False):
+        bx(ML, yt, W, h, fill=WHITE, stroke=LGRAY, sw=0.4)
+        # draw checkbox square
+        cb_size = 7
+        cb_x = ML + 4
+        cb_y = yt - h / 2 - cb_size / 2
+        cv.setLineWidth(0.6)
+        cv.setStrokeColor(MGRAY)
+        cv.setFillColor(WHITE)
+        cv.rect(cb_x, cb_y, cb_size, cb_size, fill=1, stroke=1)
+        if checked:
+            cv.setStrokeColor(BLACK)
+            cv.setLineWidth(1)
+            cv.line(cb_x + 1, cb_y + cb_size / 2, cb_x + cb_size / 2 - 1, cb_y + 1)
+            cv.line(cb_x + cb_size / 2 - 1, cb_y + 1, cb_x + cb_size + 1, cb_y + cb_size + 2)
+        tx(label, ML + 15, yt - h + 4, FN, 8)
+        return yt - h
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 1. MAIN HEADER
+    # ═══════════════════════════════════════════════════════════════════════
+    hh = 22
+    bx(ML, y, W * 0.72, hh, fill=DARK, stroke=DARK, sw=1)
+    bx(ML + W * 0.72, y, W * 0.28, hh, fill=DARK, stroke=DARK, sw=1)
+    tx("REC HAVACILIK  \u2192  YOL VE MEYDAN YETERLİLİK EĞİTİM FORMU",
+       ML + 6, y - hh + 7, FB, 9, WHITE)
+    tx("FOP-FRM02", ML + W * 0.72 + 4, y - 7, FB, 7, WHITE)
+    tx(f"Rev: {rev_date}", ML + W * 0.72 + 4, y - hh + 5, FB, 8, RED)
     y -= hh
 
-    y = shdr(y, "FLIGHT DETAILS")
-    text = f"Date: {fi.get('date','')}    A/C Type: {fi.get('ac_type','')}    PIC: {fi.get('pic','')}    SIC: {fi.get('sic','')}"
-    y = tblk(y, text); y -= 3
+    # subtitle
+    bx(ML, y, W, 12, fill=colors.HexColor("#EAF0F6"), stroke=LGRAY, sw=0.4)
+    tx("ROUTE AND AERODROME QUALIFICATION TRAINING FORM",
+       ML, y - 12 + 3, FN, 7.5, DARK, align="center", width=W)
+    y -= 12
 
-    y = shdr(y, "AERODROME")
-    y = tblk(y, f"{page_label}: {(airport.get('name') or '').upper()} ({(airport.get('icao') or '').upper()})   |   Category: {airport.get('category','')}")
-    y -= 3
+    # ═══════════════════════════════════════════════════════════════════════
+    # 2. FLIGHT DETAILS TABLE
+    # ═══════════════════════════════════════════════════════════════════════
+    y = section_hdr(y, "FLIGHT DETAILS")
+    row_h = 14
+    cols = [W * 0.18, W * 0.18, W * 0.32, W * 0.32]
+    headers = ["Date", "A/C Type", "PIC", "SIC"]
+    values  = [
+        fi.get("date", ""),
+        fi.get("ac_type", ""),
+        fi.get("pic", "").upper(),
+        fi.get("sic", "").upper(),
+    ]
+    cx = ML
+    for i, (hd, col_w) in enumerate(zip(headers, cols)):
+        bx(cx, y, col_w, row_h, fill=colors.HexColor("#D6E4F0"), stroke=LGRAY, sw=0.5)
+        tx(hd, cx, y - row_h + 4, FB, 8, DARK, align="center", width=col_w)
+        cx += col_w
+    y -= row_h
+    cx = ML
+    for i, (val, col_w) in enumerate(zip(values, cols)):
+        bx(cx, y, col_w, row_h, fill=WHITE, stroke=LGRAY, sw=0.5)
+        tx(val, cx, y - row_h + 4, FB, 8.5, BLACK, align="center", width=col_w)
+        cx += col_w
+    y -= row_h
+    y -= 2
 
-    y = shdr(y, "AERODROME RISK ASSESSMENT")
-    risk_lines = []
-    risk_lines.append(f"Risk Level: {airport.get('ra_risk_level','N/A')}   |   Score: {airport.get('ra_risk_score','N/A')}")
-    if airport.get('ra_assessment_date'):
-        risk_lines.append(f"Last Survey Update: {airport.get('survey_last_updated') or airport.get('ra_assessment_date')}   |   By: {airport.get('ra_assessed_by','N/A')}")
-    for d in (airport.get('ra_key_drivers') or [])[:5]:
-        risk_lines.append(f"• {d}")
-    y = tblk(y, "\n".join(risk_lines), bg=RISKBG, border_color=RISKBORDER, border_sw=1.2)
-    y -= 3
+    # ═══════════════════════════════════════════════════════════════════════
+    # 3. AERODROME TABLE
+    # ═══════════════════════════════════════════════════════════════════════
+    y = section_hdr(y, "AERODROME")
+    cat = (airport.get("category") or "B").strip().upper()
+    # header row
+    col_w2 = [W * 0.50, W * 0.25, W * 0.25]
+    hdrs2  = ["Airport Name", "ICAO", "Category"]
+    cx = ML
+    for hd, cw in zip(hdrs2, col_w2):
+        bx(cx, y, cw, row_h, fill=colors.HexColor("#D6E4F0"), stroke=LGRAY, sw=0.5)
+        tx(hd, cx, y - row_h + 4, FB, 8, DARK, align="center", width=cw)
+        cx += cw
+    y -= row_h
+    # data row
+    aname = (airport.get("name") or airport.get("airport_name") or "").upper()
+    icao  = (airport.get("icao") or "").upper()
+    cx = ML
+    vals2 = [aname, icao, cat]
+    for vi, (val, cw) in enumerate(zip(vals2, col_w2)):
+        bx(cx, y, cw, row_h + 2, fill=WHITE, stroke=LGRAY, sw=0.5)
+        color = RED if vi == 2 else BLACK
+        tx(val, cx, y - row_h + 2, FB, 9 if vi == 2 else 8.5, color, align="center", width=cw)
+        cx += cw
+    y -= (row_h + 2)
+    y -= 2
 
-    y = shdr(y, "SURVEY STATUS / AIRAC CHECK")
-    age_txt = "Unknown"
-    if survey_status.get('days_old') is not None:
-        age_txt = f"{survey_status['days_old']} days"
-    survey_block = (
-        f"Status: {survey_status.get('status','N/A')}\n"
-        f"Last reviewed: {survey_status.get('last') or 'N/A'}\n"
-        f"Survey age at RAQ issue: {age_txt}\n"
-        f"{survey_status.get('message','')}"
-    )
-    status = survey_status.get('status')
-    bg = colors.HexColor("#EAFAF1") if status == 'CURRENT' else colors.HexColor("#FEF9E7") if status == 'REVIEW DUE' else colors.HexColor("#FADBD8")
-    bd = colors.HexColor("#1E8449") if status == 'CURRENT' else colors.HexColor("#D4AC0D") if status == 'REVIEW DUE' else colors.HexColor("#C0392B")
-    y = tblk(y, survey_block, bg=bg, border_color=bd, border_sw=1.2)
-    y -= 3
+    # ═══════════════════════════════════════════════════════════════════════
+    # 4. FAMILIARIZATION CONDUCTED BY
+    # ═══════════════════════════════════════════════════════════════════════
+    y = section_hdr(y, "FAMILIARIZATION CONDUCTED BY")
+    half = W / 2
+    fam_h = 18
+    bx(ML,        y, half, fam_h, fill=colors.HexColor("#D6E4F0"), stroke=LGRAY, sw=0.5)
+    bx(ML + half, y, half, fam_h, fill=colors.HexColor("#D6E4F0"), stroke=LGRAY, sw=0.5)
+    tx("Self Briefing",   ML,        y - fam_h + 6, FB, 8, DARK, align="center", width=half)
+    tx("Local Authority", ML + half, y - fam_h + 6, FB, 8, DARK, align="center", width=half)
+    y -= fam_h
+    bx(ML,        y, half, fam_h, fill=WHITE, stroke=LGRAY, sw=0.5)
+    bx(ML + half, y, half, fam_h, fill=WHITE, stroke=LGRAY, sw=0.5)
+    # empty checkboxes
+    for cx_off in [half / 2 - 5, half + half / 2 - 5]:
+        cb_y = y - fam_h / 2 - 4
+        cv.setLineWidth(0.7); cv.setStrokeColor(MGRAY); cv.setFillColor(WHITE)
+        cv.rect(ML + cx_off, cb_y, 9, 9, fill=1, stroke=1)
+    y -= fam_h
+    y -= 2
 
-    # -- Section 1/2/3 tek kutuda
-    s1 = (airport.get('section1') or '').strip()
-    s2 = (airport.get('section2') or '').strip()
-    s3 = (airport.get('section3') or '').strip()
+    # ═══════════════════════════════════════════════════════════════════════
+    # 5. FOLLOWING ITEMS BRIEFED (empty checkboxes)
+    # ═══════════════════════════════════════════════════════════════════════
+    y = section_hdr(y, "FOLLOWING ITEMS WERE BRIEFED AND FAMILIARIZED FOR THE ROUTE FLOWN")
+    items_briefed = [
+        "Terrain and Safe Altitudes",
+        "Communication and ATC Facilities",
+        "Search & Rescue Procedures",
+        "Airport Layout",
+        "Approach Aids",
+        "Instrument Approach and Hold Procedures",
+        "Operating Minima",
+    ]
+    for item in items_briefed:
+        y = checkbox_row(y, item, h=13)
+    y -= 2
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 6. SPECIAL ITEMS BY AERODROME CATEGORY (empty checkboxes)
+    # ═══════════════════════════════════════════════════════════════════════
+    y = section_hdr(y, "SPECIAL ITEMS BRIEFED DUE TO AERODROME CATEGORY")
+    special_items = [
+        "(1) Non-standard approach aids or approach patterns",
+        "(2) Unusual local weather conditions",
+        "(3) Unusual characteristics or performance limitations",
+        "(4) Other relevant considerations: obstructions, physical layout, lighting etc.",
+        "(5) Category C aerodromes: additional considerations for approach/landing/take-off.",
+    ]
+    for item in special_items:
+        y = checkbox_row(y, item, h=13)
+    y -= 2
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 7. SPECIAL REMARKS – AUTO FROM DATABASE (Section 1+2+3)
+    # ═══════════════════════════════════════════════════════════════════════
+    s1 = (airport.get("section1") or "").strip()
+    s2 = (airport.get("section2") or "").strip()
+    s3 = (airport.get("section3") or "").strip()
     combined = "\n".join(p for p in [s1, s2, s3] if p)
-    if combined:
-        y = shdr(y, "AERODROME BRIEFING SUMMARY")
-        y = tblk(y, combined)
-        y -= 3
+    y = section_hdr(y, "SPECIAL REMARKS  –  AERODROME BRIEFING  (AUTO FROM DATABASE)")
+    y = text_block(y, combined or "No briefing data available.", fsize=8)
+    y -= 2
 
-    # -- AIP/AOI live (sadece konfigureliyse)
-    if local_ops.get('items'):
-        y = shdr(y, "LOCAL OPERATIONAL PROCEDURES — AIP / AOI")
-        local_lines = [f"Source: {local_ops.get('source_name','AIP/AOI')}  |  Checked: {local_ops.get('checked_on','')}"]
-        for item in local_ops['items'][:6]:
-            local_lines.append(f"• {item}")
-        y = tblk(y, "\n".join(local_lines))
-        y -= 3
+    # ═══════════════════════════════════════════════════════════════════════
+    # 8. AERODROME RISK ASSESSMENT – AUTO FROM DATABASE
+    # ═══════════════════════════════════════════════════════════════════════
+    risk_level = (airport.get("ra_risk_level") or "").upper()
+    risk_score = airport.get("ra_risk_score", "")
+    ops_appr   = airport.get("ra_ops_approval") or airport.get("ra_risk_level") or ""
+    mitigation = airport.get("ra_mitigation") or ""
+    if risk_level == "HIGH":
+        rbg = RISKBG_HIGH
+    elif risk_level == "MEDIUM":
+        rbg = RISKBG_MED
+    else:
+        rbg = RISKBG_LOW
+    y = section_hdr(y, "AERODROME RISK ASSESSMENT  (AUTO – DATABASE)")
+    risk_txt = f"RISK LEVEL: {risk_level} | CAT: {cat} | {ops_appr}"
+    if mitigation:
+        risk_txt += f"\nMITIGATION: {mitigation}"
+    y = text_block(y, risk_txt, bg=rbg, fsize=8)
+    y -= 2
 
-
+    # ═══════════════════════════════════════════════════════════════════════
+    # 9. CZIB WARNING (if any)
+    # ═══════════════════════════════════════════════════════════════════════
+    czib_text = fi.get("czib", "")
     if czib_text:
-        y = shdr(y, "SECURITY / CZIB")
-        y = tblk(y, czib_text, bg=colors.HexColor("#FADBD8"), border_color=colors.HexColor("#C0392B"), border_sw=1.2)
-        y -= 3
+        y = section_hdr(y, "SECURITY / CZIB WARNING")
+        y = text_block(y, czib_text, bg=RISKBG_HIGH, border=RED, bsw=1.2, fsize=8)
+        y -= 2
 
-    cert = "I hereby certify that route and aerodrome familiarization was completed for the flight in accordance with AMC1 ORO.FC.105 b(2);c and OM PART C."
-    y = shdr(y, "CERTIFICATION")
-    y = tblk(y, cert)
+    # ═══════════════════════════════════════════════════════════════════════
+    # 10. CERTIFICATION + COMPLETED BY
+    # ═══════════════════════════════════════════════════════════════════════
+    cert = ("I hereby certify that route and aerodrome familiarization was completed "
+            "for the flight in accordance with AMC1 ORO.FC.105 b(2);c and OM PART C.")
+    cert_h = 22
+    bx(ML, y, W, cert_h, fill=colors.HexColor("#F5F5F5"), stroke=LGRAY, sw=0.5)
+    for wrapped_ln in wraplines(cert, "Helvetica-Oblique", 7.5, W - 10):
+        tx(wrapped_ln, ML + 5, y - 6, "Helvetica-Oblique", 7.5, colors.HexColor("#555555"))
+        y -= 9
+    y -= (cert_h - 9 + 2)
+
+    # completed by row
+    comp_h = 16
+    bx(ML,           y, W * 0.25, comp_h, fill=colors.HexColor("#D6E4F0"), stroke=LGRAY, sw=0.5)
+    bx(ML + W * 0.25, y, W * 0.50, comp_h, fill=WHITE, stroke=LGRAY, sw=0.5)
+    bx(ML + W * 0.75, y, W * 0.25, comp_h, fill=WHITE, stroke=LGRAY, sw=0.5)
+    tx("Completed by:", ML + 4, y - comp_h + 5, FB, 8, DARK)
+    pic = fi.get("pic", "").upper()
+    tx(pic, ML + W * 0.25, y - comp_h + 5, FB, 8.5, BLACK, align="center", width=W * 0.50)
+    tx(fi.get("date", ""), ML + W * 0.75, y - comp_h + 5, FN, 8, BLACK, align="center", width=W * 0.25)
+    y -= comp_h
 
 
 def generate_booklet_pdf(airport_list, airports_db, fi):
