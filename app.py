@@ -1275,13 +1275,8 @@ with st.expander("⚙", expanded=False):
                         summary = gen_summary_items(survey, result)
                         today_str = datetime.date.today().strftime("%Y-%m-%d")
                         due_str = (datetime.date.today() + datetime.timedelta(days=28)).strftime("%Y-%m-%d")
-                        ok = update_airport(icao_e, {
-                            "icao": icao_e,
-                            "name": name_e or airports.get(icao_e, {}).get("name", icao_e),
-                            "category": ra_cat,
-                            "section1": "\n".join(summary),
-                            "section2": "",
-                            "section3": "",
+                        # Section 1/2/3 korunur — sadece risk ve meta alanlar güncellenir
+                        update_payload = {
                             "ra_risk_level": result['risk'],
                             "ra_risk_score": result['score'],
                             "ra_risk_basis": result['basis'],
@@ -1291,13 +1286,16 @@ with st.expander("⚙", expanded=False):
                             "ra_assessment_date": today_str,
                             "ra_reassessment_due": due_str,
                             "ra_assessed_by": assessed_by or "Admin",
+                            "ra_ops_approval": result.get("ops_approval", "DISPATCH OK"),
+                            "ra_mitigation": "; ".join(result.get("actions", [])[:3]),
                             "survey_last_updated": today_str,
                             "survey_updated_by": assessed_by or "Admin",
-                            "survey_version": airports.get(icao_e, {}).get("survey_version", "v1"),
-                            "aip_source_name": aip_name,
-                            "aip_source_url": aip_url,
-                            "aip_reference": aip_ref,
-                        })
+                            "category": ra_cat,
+                        }
+                        if aip_name: update_payload["aip_source_name"] = aip_name
+                        if aip_url:  update_payload["aip_source_url"]  = aip_url
+                        if aip_ref:  update_payload["aip_reference"]   = aip_ref
+                        ok = update_airport(icao_e, update_payload)
                         if ok:
                             st.success(f"✔ {icao_e} risk assessment saved. AIRAC review due after: {due_str}")
                             st.cache_data.clear(); airports, risks = load_db(); st.rerun()

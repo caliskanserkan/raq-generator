@@ -191,36 +191,48 @@ def update_airport(icao: str, updates: Dict[str, Any]) -> bool:
     try:
         ensure_schema(conn)
 
-        # Add unexpected columns safely as TEXT so the app remains resilient.
+        # Yeni kolonlar varsa ekle
         existing_cols = _get_existing_columns(conn, "airports")
         for key in updates.keys():
             if key not in existing_cols and key not in ("icao",):
                 conn.execute(f"ALTER TABLE airports ADD COLUMN {key} TEXT")
+                existing_cols[key] = "TEXT"
         conn.commit()
 
+        # Mevcut satırı çek — tüm alanlar korunacak, sadece updates üzerine yazılacak
         current = conn.execute("SELECT * FROM airports WHERE icao = ?", (icao,)).fetchone()
         merged: Dict[str, Any] = {"icao": icao}
         if current:
-            merged.update(dict(current))
+            merged.update({k: v for k, v in dict(current).items() if v is not None})
+        # Gelen updates her zaman kazanır (overwrite)
         merged.update(updates)
         merged["icao"] = icao
 
-        cols = list(merged.keys())
-        placeholders = ", ".join("?" for _ in cols)
-        update_clause = ", ".join(f"{col}=excluded.{col}" for col in cols if col != "icao")
-        values = [_serialize_value(col, merged[col]) for col in cols]
+        # Sadece DB'de var olan kolonları yaz
+        db_cols = _get_existing_columns(conn, "airports")
+        cols   = [c for c in merged.keys() if c in db_cols]
+        values = [_serialize_value(c, merged[c]) for c in cols]
 
-        sql = f"""
-            INSERT INTO airports ({", ".join(cols)})
-            VALUES ({placeholders})
-            ON CONFLICT(icao) DO UPDATE SET
-            {update_clause}
-        """
-        conn.execute(sql, values)
+        set_clause = ", ".join(f"{c} = ?" for c in cols if c != "icao")
+        set_vals   = [_serialize_value(c, merged[c]) for c in cols if c != "icao"]
+
+        exists = conn.execute("SELECT 1 FROM airports WHERE icao = ?", (icao,)).fetchone()
+        if exists:
+            conn.execute(f"UPDATE airports SET {set_clause} WHERE icao = ?", set_vals + [icao])
+        else:
+            placeholders = ", ".join("?" for _ in cols)
+            conn.execute(f"INSERT INTO airports ({', '.join(cols)}) VALUES ({placeholders})", values)
+
         conn.commit()
         return True
-    except Exception:
+    except Exception as e:
         conn.rollback()
+        # Hatayı Streamlit'e ilet
+        try:
+            import streamlit as _st
+            _st.error(f"DB güncelleme hatası: {e}")
+        except Exception:
+            pass
         return False
     finally:
         conn.close()
