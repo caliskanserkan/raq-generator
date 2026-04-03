@@ -1,9 +1,4 @@
 streamlit
 reportlab
-openpyxl
-gspread
-google-auth
-google-auth-oauthlib
-anthropic
 requests
 beautifulsoup4

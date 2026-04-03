@@ -1,207 +1,235 @@
-import streamlit as st
-import gspread
-from google.oauth2.service_account import Credentials
+from __future__ import annotations
 
-TOPICS = [
-    "Approach & Traffic Density",
-    "Obstacles / Terrain",
-    "Seasonal / Meteorology",
-    "ATC Phraseology / Language",
-    "Complex Taxi Routings",
-    "RWY Ops / Late Clearance",
-    "Security / Terror Threat",
-    "Handling / Fuel / Pax Support",
-    "Radio Nav / GNSS Reliability",
-    "AD Elev / Max TMA MSA",
-]
+import json
+import os
+import sqlite3
+from pathlib import Path
+from typing import Any, Dict, Iterable, Tuple
 
-def get_gsheet():
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
-    creds_dict = {
-        "type":                        st.secrets["gcp"]["type"],
-        "project_id":                  st.secrets["gcp"]["project_id"],
-        "private_key_id":              st.secrets["gcp"]["private_key_id"],
-        "private_key":                 st.secrets["gcp"]["private_key"],
-        "client_email":                st.secrets["gcp"]["client_email"],
-        "client_id":                   st.secrets["gcp"]["client_id"],
-        "auth_uri":                    st.secrets["gcp"]["auth_uri"],
-        "token_uri":                   st.secrets["gcp"]["token_uri"],
-        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-        "client_x509_cert_url": (
-            f"https://www.googleapis.com/robot/v1/metadata/x509/"
-            f"{st.secrets['gcp']['client_email']}"
-        ),
-    }
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    client = gspread.authorize(creds)
-    return client.open_by_key(st.secrets["sheets"]["spreadsheet_id"])
+try:
+    import streamlit as st
+except Exception:
+    st = None
 
 
-def _safe_float(v):
-    """Return float if v looks numeric, else 0.0"""
+JSON_FIELDS = {
+    "ra_risk_basis",
+    "ra_key_drivers",
+    "ra_actions",
+    "ra_briefing_items",
+}
+
+REQUIRED_COLUMNS = {
+    "icao": "TEXT PRIMARY KEY",
+    "name": "TEXT",
+    "category": "TEXT",
+    "section1": "TEXT",
+    "section2": "TEXT",
+    "section3": "TEXT",
+    "ra_risk_level": "TEXT",
+    "ra_risk_score": "INTEGER",
+    "ra_risk_basis": "TEXT",
+    "ra_key_drivers": "TEXT",
+    "ra_actions": "TEXT",
+    "ra_briefing_items": "TEXT",
+    "ra_assessment_date": "TEXT",
+    "ra_reassessment_due": "TEXT",
+    "ra_assessed_by": "TEXT",
+    "survey_last_updated": "TEXT",
+    "survey_updated_by": "TEXT",
+    "survey_version": "TEXT",
+    "aip_source_name": "TEXT",
+    "aip_source_url": "TEXT",
+    "aip_reference": "TEXT",
+    "aip_last_checked": "TEXT",
+}
+
+
+def _get_db_path() -> Path:
+    # Streamlit secrets first
+    if st is not None:
+        try:
+            db_path = st.secrets.get("database", {}).get("path", "")
+            if db_path:
+                return Path(db_path)
+        except Exception:
+            pass
+
+    # Environment variable fallback
+    env_path = os.getenv("FBAT_DB_PATH", "").strip()
+    if env_path:
+        return Path(env_path)
+
+    # Default local DB
+    return Path(__file__).resolve().parent / "airports.db"
+
+
+def _connect() -> sqlite3.Connection:
+    db_path = _get_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA foreign_keys=ON;")
+    return conn
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _get_existing_columns(conn: sqlite3.Connection, table: str) -> Dict[str, str]:
+    cols: Dict[str, str] = {}
+    if not _table_exists(conn, table):
+        return cols
+    for row in conn.execute(f"PRAGMA table_info({table})").fetchall():
+        cols[row["name"]] = row["type"]
+    return cols
+
+
+def ensure_schema(conn: sqlite3.Connection | None = None) -> None:
+    owns_conn = conn is None
+    conn = conn or _connect()
     try:
-        return float(str(v).replace(",", ".").strip())
-    except (ValueError, TypeError):
-        return 0.0
+        if not _table_exists(conn, "airports"):
+            col_sql = ", ".join(f"{name} {col_type}" for name, col_type in REQUIRED_COLUMNS.items())
+            conn.execute(f"CREATE TABLE airports ({col_sql})")
+            conn.commit()
+            return
+
+        existing = _get_existing_columns(conn, "airports")
+        for col, col_type in REQUIRED_COLUMNS.items():
+            if col not in existing:
+                conn.execute(f"ALTER TABLE airports ADD COLUMN {col} {col_type}")
+        conn.commit()
+    finally:
+        if owns_conn:
+            conn.close()
 
 
-def _compute_risk(s_vals, l_vals, alt_msa_score, category):
-    """
-    Replicate MATRIX_V8 / MATRIX_STORE formula exactly:
-      base = ROUND(AVG_TOP3_S + AVG_TOP3_L - 1)
-           + (1 if alt_msa_score >= 1)
-           + (1 if category == "C")
-    """
-    top3_s = sorted(s_vals, reverse=True)[:3]
-    top3_l = sorted(l_vals, reverse=True)[:3]
-    if not top3_s or not top3_l:
-        return 0, "N/A", "N/A"
+def _deserialize_value(key: str, value: Any) -> Any:
+    if value is None:
+        if key in JSON_FIELDS:
+            return []
+        return value
 
-    base = round(sum(top3_s) / len(top3_s) + sum(top3_l) / len(top3_l) - 1)
-    base += 1 if alt_msa_score >= 1 else 0
-    base += 1 if category == "C" else 0
-
-    if base <= 6:
-        rl, ops = "LOW", "DISPATCH OK"
-    elif base <= 9:
-        rl, ops = "MEDIUM", "DISPATCH OK"
-    elif base <= 12:
-        rl = "HIGH"
-        ops = (
-            "OPS MANAGER APPROVAL REQUIRED"
-            if category == "C"
-            else "CAPTAIN REVIEW / DISPATCH COORDINATION"
-        )
-    else:
-        rl, ops = "EXTREME", "OPS MANAGER APPROVAL REQUIRED"
-
-    return base, rl, ops
+    if key in JSON_FIELDS:
+        if isinstance(value, (list, dict)):
+            return value
+        if isinstance(value, str):
+            txt = value.strip()
+            if not txt:
+                return []
+            try:
+                return json.loads(txt)
+            except Exception:
+                # tolerate newline text fallback
+                return [line.strip() for line in txt.splitlines() if line.strip()]
+        return []
+    return value
 
 
-@st.cache_data(ttl=300)
-def load_db():
-    """
-    Returns (airports, risks).
+def _serialize_value(key: str, value: Any) -> Any:
+    if key in JSON_FIELDS:
+        if value is None:
+            return json.dumps([])
+        if isinstance(value, str):
+            # keep existing text but store consistently as JSON list when possible
+            lines = [line.strip() for line in value.splitlines() if line.strip()]
+            return json.dumps(lines if lines else [value] if value else [])
+        return json.dumps(value, ensure_ascii=False)
+    return value
 
-    airports[ICAO] = {icao, name, section1..3, updated, category,
-                      ad_elev_ft, max_tma_msa, alt_msa_score}
 
-    risks[ICAO]    = {base_score, risk_level, ops_approval, mitigation,
-                      max_s, max_l,
-                      s: [s1..s10],  l: [l1..l10]}
-    """
+def load_db() -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    conn = _connect()
     try:
-        sh   = get_gsheet()
-        adb  = sh.worksheet("AIRPORT_DB").get_all_values()
-        mst  = sh.worksheet("MATRIX_STORE").get_all_values()
+        ensure_schema(conn)
+        rows = conn.execute("SELECT * FROM airports ORDER BY icao").fetchall()
+        airports: Dict[str, Dict[str, Any]] = {}
+        risks: Dict[str, Dict[str, Any]] = {}
 
-        # ── AIRPORT_DB ────────────────────────────────────────────────
-        airports = {}
-        for row in adb[1:]:
-            if not row or not row[0]:
+        for row in rows:
+            data = dict(row)
+            clean = {k: _deserialize_value(k, v) for k, v in data.items()}
+            icao = (clean.get("icao") or "").upper().strip()
+            if not icao:
                 continue
-            icao = str(row[0]).upper().strip()
-            def _g(r, i, default=""):
-                return r[i] if len(r) > i and r[i] else default
+            clean["icao"] = icao
+            airports[icao] = clean
 
-            airports[icao] = {
-                "icao":           icao,
-                "name":           _g(row, 1, icao),
-                "section1":       _g(row, 2),
-                "section2":       _g(row, 3),
-                "section3":       _g(row, 4),
-                "updated":        str(_g(row, 6))[:10],
-                "category":       _g(row, 8, "A"),
-                "ad_elev_ft":     int(_safe_float(_g(row, 9,  0))),
-                "max_tma_msa":    int(_safe_float(_g(row, 10, 0))),
-                "alt_msa_score":  int(_safe_float(_g(row, 11, 0))),
-            }
-
-        # ── MATRIX_STORE ──────────────────────────────────────────────
-        risks = {}
-        for row in mst[1:]:
-            if not row or not row[0]:
-                continue
-            icao = str(row[0]).upper().strip()
-
-            # S1-S9  → columns B-J  (indices 1-9)
-            # S10    → formula cell (index 10) — use alt_msa_score+1 from AIRPORT_DB
-            # L1-L9  → columns L-T  (indices 11-19)
-            # L10    → formula cell (index 20) — same as S10
-            raw_s = [_safe_float(row[i]) if i < len(row) else 0.0 for i in range(1, 10)]
-            raw_l = [_safe_float(row[i]) if i < len(row) else 0.0 for i in range(11, 20)]
-
-            # Pull alt_msa_score from AIRPORT_DB if available
-            ams = airports.get(icao, {}).get("alt_msa_score", 0)
-            s10 = float(ams + 1)   # formula: =IFERROR(alt_msa_score+1, 2)
-            l10 = float(ams + 1)
-
-            s_all = raw_s + [s10]
-            l_all = raw_l + [l10]
-
-            cat = row[27] if len(row) > 27 and row[27] else airports.get(icao, {}).get("category", "A")
-            mit = row[24] if len(row) > 24 else ""
-
-            base, rl, ops = _compute_risk(s_all, l_all, ams, cat)
-
-            max_s = round(sum(sorted(s_all, reverse=True)[:3]) / 3) if s_all else 0
-            max_l = round(sum(sorted(l_all, reverse=True)[:3]) / 3) if l_all else 0
-
-            risks[icao] = {
-                "base_score":   base,
-                "risk_level":   rl,
-                "ops_approval": ops,
-                "mitigation":   mit,
-                "max_s":        max_s,
-                "max_l":        max_l,
-                "s":            s_all,
-                "l":            l_all,
-            }
-
+            if clean.get("ra_risk_level"):
+                risks[icao] = {
+                    "risk_level": clean.get("ra_risk_level"),
+                    "score": clean.get("ra_risk_score"),
+                    "basis": clean.get("ra_risk_basis") or [],
+                    "drivers": clean.get("ra_key_drivers") or [],
+                    "actions": clean.get("ra_actions") or [],
+                    "summary": clean.get("ra_briefing_items") or [],
+                    "assessment_date": clean.get("ra_assessment_date"),
+                    "reassessment_due": clean.get("ra_reassessment_due"),
+                    "assessed_by": clean.get("ra_assessed_by"),
+                    "survey_last_updated": clean.get("survey_last_updated"),
+                    "survey_updated_by": clean.get("survey_updated_by"),
+                    "survey_version": clean.get("survey_version"),
+                }
         return airports, risks
-
-    except Exception as e:
-        st.error(f"Veritabani hatasi: {e}")
-        return {}, {}
+    finally:
+        conn.close()
 
 
-def update_airport(icao, fields):
-    """
-    Write fields to AIRPORT_DB.
-    If ICAO exists → update in-place. Else → append new row.
-    col_map uses 1-based gspread column indices.
-    """
-    col_map = {
-        "name":     2,
-        "section1": 3,
-        "section2": 4,
-        "section3": 5,
-        "category": 9,
-    }
-    try:
-        sh  = get_gsheet()
-        ws  = sh.worksheet("AIRPORT_DB")
-        rows = ws.get_all_values()
-
-        for i, row in enumerate(rows):
-            if row and str(row[0]).upper().strip() == icao.upper().strip():
-                for field, val in fields.items():
-                    if field in col_map:
-                        ws.update_cell(i + 1, col_map[field], val)
-                return True
-
-        # ICAO not found — append new row
-        new_row = [""] * 12
-        new_row[0] = icao.upper()
-        for field, val in fields.items():
-            if field in col_map:
-                new_row[col_map[field] - 1] = val
-        ws.append_row(new_row)
-        return True
-
-    except Exception as e:
-        st.error(f"Guncelleme hatasi: {e}")
+def update_airport(icao: str, updates: Dict[str, Any]) -> bool:
+    icao = (icao or "").upper().strip()
+    if not icao:
         return False
+
+    conn = _connect()
+    try:
+        ensure_schema(conn)
+
+        # Add unexpected columns safely as TEXT so the app remains resilient.
+        existing_cols = _get_existing_columns(conn, "airports")
+        for key in updates.keys():
+            if key not in existing_cols and key not in ("icao",):
+                conn.execute(f"ALTER TABLE airports ADD COLUMN {key} TEXT")
+        conn.commit()
+
+        current = conn.execute("SELECT * FROM airports WHERE icao = ?", (icao,)).fetchone()
+        merged: Dict[str, Any] = {"icao": icao}
+        if current:
+            merged.update(dict(current))
+        merged.update(updates)
+        merged["icao"] = icao
+
+        cols = list(merged.keys())
+        placeholders = ", ".join("?" for _ in cols)
+        update_clause = ", ".join(f"{col}=excluded.{col}" for col in cols if col != "icao")
+        values = [_serialize_value(col, merged[col]) for col in cols]
+
+        sql = f"""
+            INSERT INTO airports ({", ".join(cols)})
+            VALUES ({placeholders})
+            ON CONFLICT(icao) DO UPDATE SET
+            {update_clause}
+        """
+        conn.execute(sql, values)
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    conn = _connect()
+    try:
+        ensure_schema(conn)
+        print(f"Schema OK → {_get_db_path()}")
+    finally:
+        conn.close()
