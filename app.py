@@ -658,7 +658,7 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
     y = tblk(y, text); y -= 3
 
     y = shdr(y, "AERODROME")
-    y = tblk(y, f"{page_label}: {airport.get('name','').upper()} ({airport.get('icao','').upper()})   |   Category: {airport.get('category','')}")
+    y = tblk(y, f"{page_label}: {(airport.get('name') or '').upper()} ({(airport.get('icao') or '').upper()})   |   Category: {airport.get('category','')}")
     y -= 3
 
     y = shdr(y, "AERODROME RISK ASSESSMENT")
