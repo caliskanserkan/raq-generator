@@ -523,12 +523,7 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
         lines = [f"RISK LEVEL: {ra_risk_lvl}   |   CAT: {airport.get('category','')}   |   Score: {ra_score}"]
         if ra_date:
             lines.append(f"Assessment: {ra_date}   |   Reassessment due: {ra_due}   |   By: {ra_by}")
-        for b in ra_basis:
-            lines.append(f"  {b}")
-        if ra_drivers:
-            lines.append("Key Drivers:")
-            for d in ra_drivers[:4]:
-                lines.append(f"  - {d}")
+
         y = tblk(y, "\n".join(lines), bg=RISKBG, border_color=RISKBORDER, border_sw=1.2, pad=8)
         y -= 3
     elif risk:
