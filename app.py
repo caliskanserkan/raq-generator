@@ -234,6 +234,26 @@ def calc_risk(s):
     if s.get('lvp') == 'sometimes': add(1, 'Occasional LVP / low ceiling conditions')
     if s.get('lvp') == 'frequent':  add(2, 'Frequent LVP / fog / low visibility at this aerodrome', 'Monitor aerodrome forecast closely; verify LVP procedures and published minima')
     if s.get('xw_risk'):  add(2, 'Crosswind / windshear / contamination exposure', 'Review crosswind component limits; brief windshear escape if applicable')
+    # MSA terrain scoring
+    msa = int(s.get('msa_ft') or 0)
+    msa_sector = s.get('msa_sector', 'All sectors')
+    if msa >= 12000:
+        add(3, f'High terrain environment — MSA {msa:,} ft ({msa_sector})',
+            'Review terrain escape options and sector MSA; enhanced GPWS/TAWS awareness required',
+            'High terrain environment within TMA / route area')
+    elif msa >= 8000:
+        add(2, f'Elevated terrain environment — MSA {msa:,} ft ({msa_sector})',
+            'Verify terrain awareness and sector MSA; confirm missed approach terrain clearance')
+    elif msa >= 5000:
+        add(1, f'Moderate terrain environment — MSA {msa:,} ft ({msa_sector})')
+    # MSA interaction multipliers
+    if msa >= 8000 and not s.get('prec'):
+        add(1, 'High MSA combined with non-precision approach — increased terrain risk',
+            'Increase terrain-focused briefing depth; review raw data approach technique')
+    if msa >= 8000 and s.get('angle') in ('moderate', 'steep'):
+        add(1, 'High MSA combined with elevated/steep approach geometry',
+            'Review terrain, vertical path and go-around strategy carefully')
+
     if s.get('terr_hh'):  add(2, 'Significant terrain / mountain wave / hot-high environment', 'Review terrain awareness procedures; compute performance for hot/high conditions')
 
     # Block 6 — ATC
@@ -329,6 +349,16 @@ def gen_summary_items(s):
     if s.get('lvp') == 'frequent':   items.append("Frequent LVP / fog / low visibility — monitor forecast carefully")
     elif s.get('lvp') == 'sometimes': items.append("Occasional LVP or low ceiling conditions possible")
     if s.get('xw_risk'):          items.append("Crosswind / windshear / contamination risk — monitor conditions")
+    # MSA terrain briefing
+    msa = int(s.get('msa_ft') or 0)
+    msa_sector = s.get('msa_sector', 'All sectors')
+    if msa >= 12000:
+        items.append(f"High terrain — MSA {msa:,} ft ({msa_sector}): enhanced TAWS/GPWS awareness; terrain escape plan required")
+    elif msa >= 8000:
+        items.append(f"Elevated terrain — MSA {msa:,} ft ({msa_sector}): verify missed approach terrain clearance")
+    elif msa >= 5000:
+        items.append(f"Moderate terrain — MSA {msa:,} ft ({msa_sector})")
+
     if s.get('terr_hh'):          items.append("Significant terrain / mountain wave / hot-high environment")
     if s.get('atc') == 'significant': items.append("Significant ATC / sequencing complexity — extra time margins required")
     elif s.get('atc') == 'moderate': items.append("Moderate ATC / taxi routing complexity")
@@ -908,6 +938,17 @@ with st.expander("⚙", expanded=False):
                     ra_xw_risk = c10.checkbox("Crosswind / windshear / contamination risk significant?", key="ra_xw")
                     ra_terr_hh = c11.checkbox("Significant terrain / mountain wave / hot-high?", key="ra_thh")
 
+                    c_msa1, c_msa2 = st.columns(2)
+                    ra_msa_ft = c_msa1.number_input(
+                        "Maximum Sector Altitude / MSA (ft)", min_value=0, max_value=25000,
+                        value=0, step=100, key="ra_msa_ft",
+                        help="Enter the highest MSA in the TMA/route area. 0 = not applicable."
+                    )
+                    ra_msa_sector = c_msa2.selectbox(
+                        "MSA sector", ["All sectors", "Specific sector (worst case)", "Enroute MEA/MORA"],
+                        key="ra_msa_sector"
+                    )
+
                     st.markdown('<div class="ra-block"><h4>📡 Block 6 — ATC & Operational Complexity</h4></div>', unsafe_allow_html=True)
                     ra_atc = st.selectbox("ATC / slot / taxi complexity?",
                                           ["Low / normal","Moderate","Significant"], key="ra_atc")
@@ -980,6 +1021,8 @@ with st.expander("⚙", expanded=False):
                             'lvp':         lvp_map[ra_lvp],
                             'xw_risk':     ra_xw_risk,
                             'terr_hh':     ra_terr_hh,
+                            'msa_ft':      ra_msa_ft,
+                            'msa_sector':  ra_msa_sector,
                             'atc':         atc_map[ra_atc],
                             'mil_traff':   ra_mil_traff,
                             'gnss_risk':   {"No known risk": "no", "NOTAM'd / interference expected": "notam", "Active jamming / spoofing reported": "active"}[ra_gnss],
