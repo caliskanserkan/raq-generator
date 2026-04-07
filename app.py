@@ -201,15 +201,15 @@ def calc_risk(s):
     if gnss == 'active':
         if gnss_approaches:
             rwys = ", ".join(r[0] for r in gnss_approaches)
-            add(4, f"ACTIVE GNSS JAMMING/SPOOFING — RWY {rwys} ({', '.join(r[1] for r in gnss_approaches)}) may be UNRELIABLE",
-                'Do NOT rely on GNSS; revert to raw data (VOR/DME/ILS); verify FMS position continuously')
+            add(4, f"ACTIVE GNSS JAMMING/SPOOFING — RWY {rwys} approaches may be UNRELIABLE",
+                'Do NOT rely on GNSS; revert to raw data (VOR/DME/ILS)')
         else:
             add(4, 'Active GNSS jamming / spoofing reported in area',
-                'Do NOT rely on GNSS; revert to conventional raw data; verify FMS position continuously')
+                'Do NOT rely on GNSS; revert to conventional raw data')
     elif gnss == 'notam':
         if gnss_approaches:
             rwys = ", ".join(r[0] for r in gnss_approaches)
-            add(2, f"GNSS reliability concern (NOTAM) — RWY {rwys}: {', '.join(r[1] for r in gnss_approaches)} approach",
+            add(2, f"GNSS reliability concern (NOTAM) — RWY {rwys} approach affected",
                 'Cross-check raw data; GNSS degradation possible')
         else:
             add(2, 'GNSS / GPS reliability concern — NOTAM active or interference reported',
@@ -306,19 +306,15 @@ def gen_summary_items(s):
     if gnss == 'active':
         if gnss_approaches:
             rwys = ", ".join(r[0] for r in gnss_approaches)
-            add(4, f"ACTIVE GNSS JAMMING/SPOOFING — RWY {rwys} ({', '.join(r[1] for r in gnss_approaches)}) may be UNRELIABLE",
-                'Do NOT rely on GNSS; revert to raw data (VOR/DME/ILS); verify FMS position continuously')
+            items.append(f"⚠ ACTIVE GNSS JAMMING/SPOOFING — RWY {rwys} ({', '.join(r[1] for r in gnss_approaches)}) may be UNRELIABLE — revert to raw data")
         else:
-            add(4, 'Active GNSS jamming / spoofing reported in area',
-                'Do NOT rely on GNSS; revert to conventional raw data; verify FMS position continuously')
+            items.append("⚠ ACTIVE GNSS JAMMING/SPOOFING reported in area — do NOT rely on GNSS; use raw data (VOR/DME/ILS)")
     elif gnss == 'notam':
         if gnss_approaches:
             rwys = ", ".join(r[0] for r in gnss_approaches)
-            add(2, f"GNSS reliability concern (NOTAM) — RWY {rwys}: {', '.join(r[1] for r in gnss_approaches)} approach",
-                'Cross-check raw data; GNSS degradation possible')
+            items.append(f"GNSS reliability concern (NOTAM) — RWY {rwys}: {', '.join(r[1] for r in gnss_approaches)} — cross-check raw data")
         else:
-            add(2, 'GNSS / GPS reliability concern — NOTAM active or interference reported',
-                'Cross-check raw data (VOR/DME/ILS)')
+            items.append("GNSS / GPS reliability concern — NOTAM active or interference reported; cross-check raw data")
 
     if s.get('offset'):           items.append("Offset localizer / offset approach procedure in use")
     if s.get('madem'):            items.append("Demanding missed approach gradient — special briefing required")
