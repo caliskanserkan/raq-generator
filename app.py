@@ -194,6 +194,23 @@ def calc_risk(s):
     if s.get('angle') == 'moderate': add(2, 'Elevated approach angle (3.9°–4.49°)')
     if s.get('angle') == 'steep':    add(3, 'Steep approach angle (≥ 4.5°)', 'Brief steep approach technique; verify aircraft certification and performance compliance')
     if s.get('high_da'):             add(1, 'Terrain-limited precision minima — DA/DH ≥ 400 ft')
+    # GNSS uyarısı — yaklaşma tipiyle etkileşim
+    gnss = s.get('gnss_risk', 'no')
+    rwy_data = s.get('rwy_data', [])
+    gnss_approaches = [r for r in rwy_data if r[1] in ('GNSS', 'RNP AR', 'RNP')]
+    if gnss == 'active':
+        if gnss_approaches:
+            rwys = ", ".join(r[0] for r in gnss_approaches)
+            items.append(f"⚠ ACTIVE GNSS JAMMING/SPOOFING REPORTED — RWY {rwys}: {', '.join(r[1] for r in gnss_approaches)} approach may be UNRELIABLE — revert to raw data/conventional nav")
+        else:
+            items.append("⚠ ACTIVE GNSS JAMMING/SPOOFING REPORTED in area — do NOT rely on GNSS; use raw data (VOR/DME/ILS)")
+    elif gnss == 'notam':
+        if gnss_approaches:
+            rwys = ", ".join(r[0] for r in gnss_approaches)
+            items.append(f"GNSS reliability concern (NOTAM) — RWY {rwys}: {', '.join(r[1] for r in gnss_approaches)} approach — cross-check raw data; degradation possible")
+        else:
+            items.append("GNSS reliability concern — NOTAM active or interference reported; cross-check raw data")
+
     if s.get('offset'):              add(1, 'Offset localizer / offset approach procedure in use')
     if s.get('madem'):               add(2, 'Demanding missed approach / climb gradient above standard', 'Brief missed approach in detail; review OEI missed approach procedure')
     if s.get('oei_ma_brief'):        add(2, 'Engine-out go-around requires dedicated crew briefing')
@@ -219,6 +236,15 @@ def calc_risk(s):
     if s.get('atc') == 'moderate':   add(1, 'Moderate ATC / taxi routing complexity')
     if s.get('atc') == 'significant': add(2, 'Significant ATC / slot / sequencing complexity', 'Allow extra time margins for clearances; pre-brief complex taxi routing')
     if s.get('mil_traff'): add(2, 'Military / mixed traffic or unusual ATC phraseology', 'Review local ATC procedures and non-standard phraseology before flight')
+
+    # Block 6b — GNSS / GPS reliability
+    if s.get('gnss_risk') == 'notam':
+        add(2, 'GNSS / GPS reliability concern — NOTAM active or interference reported',
+            'Cross-check raw data (VOR/DME/ILS); GNSS approaches require crew awareness of potential degradation')
+    elif s.get('gnss_risk') == 'active':
+        add(4, 'Active GNSS jamming / spoofing reported in area',
+            'Do NOT rely on GNSS for navigation or approach; revert to conventional raw data; verify FMS position continuously',
+            'GNSS jamming or spoofing active — RNP / GNSS approaches may be unreliable or unusable')
 
     # Block 7 — Security / Oversight (weighted 3–4 pts)
     if s.get('pol_risk') == 'caution':     add(3, 'Political / security caution advisories in effect', 'Obtain current security briefing; review crew emergency protocols for this region')
@@ -264,49 +290,29 @@ def gen_summary_items(s):
     if s.get('sp_desig'):         items.append("Special aerodrome designation — operator procedures apply")
     if s.get('sp_crew'):          items.append("Special crew qualification required")
     if s.get('sp_approval'):      items.append("Special operator approval required for this destination")
-
-    # ── Pist bazlı yaklaşma özeti ──────────────────────────────────────────
-    rwy_data = s.get('rwy_data', [])
-    best_rwy = s.get('best_rwy')
-    APPR_RANK = {"CAT III":7,"CAT II":6,"ILS":5,"RNP AR":4,"GNSS":3,"RNP":2,"Non-Precision":1,"Circling":0,"—":0}
-
-    if rwy_data:
-        # En iyi yaklaşma
-        if best_rwy and best_rwy[1] not in ("—",):
-            items.append(f"Best approach: RWY {best_rwy[0]} — {best_rwy[1]}")
-        # Tüm pistleri listele
-        rwy_summary = "; ".join(f"RWY {r[0]}: {r[1]}" for r in rwy_data if r[0] and r[1] != "—")
-        if rwy_summary:
-            items.append(f"Available approaches: {rwy_summary}")
-        # Precision var mı
-        if not s.get('prec'):
-            items.append("No precision approach available — non-precision / circling only")
-    else:
-        if not s.get('prec'):
-            items.append("No precision approach available — non-precision only")
-        elif s.get('prec'):
-            items.append("Precision approach (ILS / GLS / RNP AR) available")
-
+    if not s.get('prec'):         items.append("No precision approach available — non-precision only")
+    elif s.get('prec'):           items.append("Precision approach (ILS / GLS / RNP AR) available")
     if s.get('angle') == 'steep':    items.append("Steep approach required — angle ≥ 4.5°")
     elif s.get('angle') == 'moderate': items.append("Elevated approach angle — 3.9° to 4.49°")
     if s.get('high_da'):          items.append("Terrain-limited approach minima — DA/DH ≥ 400 ft")
-
-    # Offset — MUTLAKA belirt
-    if s.get('offset'):
-        off_rwys = s.get('offset_rwys', [])
-        if off_rwys:
-            items.append(f"⚠ OFFSET approach in use — RWY {', '.join(off_rwys)} — visual segment required")
+    # GNSS uyarısı — yaklaşma tipiyle etkileşim
+    gnss = s.get('gnss_risk', 'no')
+    rwy_data = s.get('rwy_data', [])
+    gnss_approaches = [r for r in rwy_data if r[1] in ('GNSS', 'RNP AR', 'RNP')]
+    if gnss == 'active':
+        if gnss_approaches:
+            rwys = ", ".join(r[0] for r in gnss_approaches)
+            items.append(f"⚠ ACTIVE GNSS JAMMING/SPOOFING REPORTED — RWY {rwys}: {', '.join(r[1] for r in gnss_approaches)} approach may be UNRELIABLE — revert to raw data/conventional nav")
         else:
-            items.append("⚠ OFFSET localizer / offset approach procedure in use — visual segment required")
-
-    # Circling — MUTLAKA belirt
-    if s.get('circling'):
-        circ_rwys = s.get('circling_rwys', [])
-        if circ_rwys:
-            items.append(f"⚠ CIRCLING approach — RWY {', '.join(circ_rwys)} — visual manoeuvre required; min vis/ceiling critical")
+            items.append("⚠ ACTIVE GNSS JAMMING/SPOOFING REPORTED in area — do NOT rely on GNSS; use raw data (VOR/DME/ILS)")
+    elif gnss == 'notam':
+        if gnss_approaches:
+            rwys = ", ".join(r[0] for r in gnss_approaches)
+            items.append(f"GNSS reliability concern (NOTAM) — RWY {rwys}: {', '.join(r[1] for r in gnss_approaches)} approach — cross-check raw data; degradation possible")
         else:
-            items.append("⚠ CIRCLING approach available — visual manoeuvre required; min vis/ceiling critical")
+            items.append("GNSS reliability concern — NOTAM active or interference reported; cross-check raw data")
 
+    if s.get('offset'):           items.append("Offset localizer / offset approach procedure in use")
     if s.get('madem'):            items.append("Demanding missed approach gradient — special briefing required")
     if s.get('oei_ma_brief'):     items.append("Engine-out go-around procedure requires dedicated pre-flight briefing")
     if s.get('rwy_w') == 'narrow':   items.append("Narrow runway — width less than 30 m")
@@ -523,7 +529,12 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
         lines = [f"RISK LEVEL: {ra_risk_lvl}   |   CAT: {airport.get('category','')}   |   Score: {ra_score}"]
         if ra_date:
             lines.append(f"Assessment: {ra_date}   |   Reassessment due: {ra_due}   |   By: {ra_by}")
-
+        for b in ra_basis:
+            lines.append(f"  {b}")
+        if ra_drivers:
+            lines.append("Key Drivers:")
+            for d in ra_drivers[:4]:
+                lines.append(f"  - {d}")
         y = tblk(y, "\n".join(lines), bg=RISKBG, border_color=RISKBORDER, border_sw=1.2, pad=8)
         y -= 3
     elif risk:
@@ -821,70 +832,18 @@ with st.expander("⚙", expanded=False):
                     ra_sp_crew     = c2.checkbox("Special crew qualification required?", key="ra_spc")
                     ra_sp_approval = st.checkbox("Special operator approval required for this destination?", key="ra_spa")
 
-                    st.markdown('<div class="ra-block"><h4>📐 Block 2 — Runway & Approach</h4></div>', unsafe_allow_html=True)
-
-                    # ── Pist girişi ──────────────────────────────────────
-                    st.caption("Aktif pistler ve yaklaşma tipleri")
-                    APR_TYPES = ["—", "CAT III", "CAT II", "ILS", "GNSS", "RNP AR", "RNP", "Non-Precision", "Circling"]
-
-                    if "rwy_sets" not in st.session_state:
-                        st.session_state["rwy_sets"] = 1
-
-                    rwy_data = []  # [(designator, appr_type), ...]
-                    for set_i in range(st.session_state["rwy_sets"]):
-                        cols4 = st.columns(4)
-                        for j in range(4):
-                            slot = set_i * 4 + j
-                            with cols4[j]:
-                                des = st.text_input(f"RWY {slot+1}", max_chars=4,
-                                                    key=f"rwy_des_{set_i}_{j}",
-                                                    placeholder="09R").upper().strip()
-                                apr = st.selectbox("Appr", APR_TYPES,
-                                                   key=f"rwy_apr_{set_i}_{j}",
-                                                   label_visibility="collapsed")
-                                if des:
-                                    rwy_data.append((des, apr))
-
-                    col_add, _ = st.columns([1, 3])
-                    with col_add:
-                        if st.button("➕ 4 pist daha ekle", key="add_rwy_set"):
-                            st.session_state["rwy_sets"] += 1
-                            st.rerun()
-
-                    # Offset veya Circling varsa hangi pist sorusu
-                    rwy_names = [r[0] for r in rwy_data if r[0]]
-                    special_rwys = [r[0] for r in rwy_data if r[1] in ("Circling",)]
-                    offset_rwys  = [r[0] for r in rwy_data if r[1] in ("CAT III","CAT II","ILS","GNSS","RNP AR","RNP")]
-
-                    ra_offset_rwy  = []
-                    ra_circling_rwy = []
-
-                    if any(r[1] == "—" or r[1] == "Non-Precision" for r in rwy_data) and rwy_names:
-                        pass  # offset localizer sorusu
-
-                    ra_offset = st.checkbox("Offset localizer / offset approach in use?", key="ra_off")
-                    if ra_offset and rwy_names:
-                        ra_offset_rwy = st.multiselect("Offset approach — hangi pist(ler)?",
-                                                        rwy_names, key="ra_off_rwy")
-
-                    ra_circling = any(r[1] == "Circling" for r in rwy_data)
-                    if ra_circling and rwy_names:
-                        ra_circling_rwy = [r[0] for r in rwy_data if r[1] == "Circling"]
-
-                    # En yüksek yaklaşma kapasitesi
-                    APPR_RANK = {"CAT III":7,"CAT II":6,"ILS":5,"RNP AR":4,"GNSS":3,"RNP":2,"Non-Precision":1,"Circling":0,"—":0}
-                    best_rwy = max(rwy_data, key=lambda r: APPR_RANK.get(r[1],0)) if rwy_data else None
-
-                    ra_prec = "Yes" if best_rwy and APPR_RANK.get(best_rwy[1],0) >= 3 else "No"
-
+                    st.markdown('<div class="ra-block"><h4>📐 Block 2 — Approach & Procedure</h4></div>', unsafe_allow_html=True)
+                    ra_prec = st.radio("Precision approach (ILS / GLS / RNP AR with GP) available?",
+                                       ["Yes","No"], horizontal=True, key="ra_prec")
                     ra_angle = st.selectbox("Best available approach angle?",
                                             ["Normal (< 3.9°)","Elevated (3.9°–4.49°)","Steep (≥ 4.5°) — override risk"],
                                             key="ra_angle")
                     ra_high_da = st.checkbox("Precision DA/DH ≥ 400 ft due to terrain-limited minima?", key="ra_hda",
                                               disabled=(ra_prec == "No"))
                     c3, c4 = st.columns(2)
-                    ra_madem = c3.checkbox("Missed approach / climb gradient above standard?", key="ra_mad")
-                    ra_oei_ma = c4.checkbox("Engine-out go-around requires dedicated crew briefing?", key="ra_oema")
+                    ra_offset      = c3.checkbox("Offset localizer / offset approach in use?", key="ra_off")
+                    ra_madem       = c4.checkbox("Missed approach / climb gradient above standard?", key="ra_mad")
+                    ra_oei_ma      = st.checkbox("Engine-out go-around requires dedicated crew briefing?", key="ra_oema")
 
                     st.markdown('<div class="ra-block"><h4>🛬 Block 3 — Runway & Physical</h4></div>', unsafe_allow_html=True)
                     ra_rwy_w = st.selectbox("Runway width?", ["≥ 45 m","30–44 m","< 30 m"], key="ra_rwyw")
@@ -910,6 +869,13 @@ with st.expander("⚙", expanded=False):
                     ra_atc = st.selectbox("ATC / slot / taxi complexity?",
                                           ["Low / normal","Moderate","Significant"], key="ra_atc")
                     ra_mil_traff = st.checkbox("Military / mixed traffic or unusual ATC phraseology?", key="ra_mil")
+
+                    ra_gnss = st.selectbox(
+                        "GNSS / GPS signal reliability?",
+                        ["No known risk", "NOTAM'd / interference expected", "Active jamming / spoofing reported"],
+                        key="ra_gnss",
+                        help="If GNSS or RNP approach is selected and reliability is in question, a warning will be generated in the briefing summary."
+                    )
 
                     st.markdown('<div class="ra-block"><h4>🔐 Block 7 — Security, State & Oversight</h4></div>', unsafe_allow_html=True)
                     ra_pol_risk = st.selectbox("Political / security risk?",
@@ -948,8 +914,6 @@ with st.expander("⚙", expanded=False):
 
                         survey = {
                             'cat':         ra_cat,
-                            'rwy_data':    rwy_data,
-                            'best_rwy':    best_rwy,
                             'sp_desig':    ra_sp_desig,
                             'sp_crew':     ra_sp_crew,
                             'sp_approval': ra_sp_approval,
@@ -957,9 +921,6 @@ with st.expander("⚙", expanded=False):
                             'angle':       angle_map[ra_angle],
                             'high_da':     ra_high_da if ra_prec == "Yes" else False,
                             'offset':      ra_offset,
-                            'offset_rwys': ra_offset_rwy,
-                            'circling':    ra_circling,
-                            'circling_rwys': ra_circling_rwy,
                             'madem':       ra_madem,
                             'oei_ma_brief':ra_oei_ma,
                             'rwy_w':       rwy_map[ra_rwy_w],
@@ -973,6 +934,7 @@ with st.expander("⚙", expanded=False):
                             'terr_hh':     ra_terr_hh,
                             'atc':         atc_map[ra_atc],
                             'mil_traff':   ra_mil_traff,
+                            'gnss_risk':   {"No known risk": "no", "NOTAM'd / interference expected": "notam", "Active jamming / spoofing reported": "active"}[ra_gnss],
                             'pol_risk':    pol_map[ra_pol_risk],
                             'arpt_sec':    sec_map[ra_arpt_sec],
                             'st_oversight':ov_map[ra_st_oversight],
