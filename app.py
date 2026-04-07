@@ -832,18 +832,60 @@ with st.expander("⚙", expanded=False):
                     ra_sp_crew     = c2.checkbox("Special crew qualification required?", key="ra_spc")
                     ra_sp_approval = st.checkbox("Special operator approval required for this destination?", key="ra_spa")
 
-                    st.markdown('<div class="ra-block"><h4>📐 Block 2 — Approach & Procedure</h4></div>', unsafe_allow_html=True)
-                    ra_prec = st.radio("Precision approach (ILS / GLS / RNP AR with GP) available?",
-                                       ["Yes","No"], horizontal=True, key="ra_prec")
+                    st.markdown('<div class="ra-block"><h4>📐 Block 2 — Runway & Approach</h4></div>', unsafe_allow_html=True)
+
+                    # ── Pist girişi ──────────────────────────────────────
+                    st.caption("Active runways and approach types / Aktif pistler ve yaklaşma tipleri")
+                    APR_TYPES = ["—","CAT III","CAT II","ILS","GNSS","RNP AR","RNP","Non-Precision","Circling"]
+
+                    if "rwy_sets" not in st.session_state:
+                        st.session_state["rwy_sets"] = 1
+
+                    rwy_data = []
+                    for set_i in range(st.session_state["rwy_sets"]):
+                        cols4 = st.columns(4)
+                        for j in range(4):
+                            slot = set_i * 4 + j
+                            with cols4[j]:
+                                des = st.text_input(f"RWY {slot+1}", max_chars=4,
+                                                    key=f"rwy_des_{set_i}_{j}",
+                                                    placeholder="09R").upper().strip()
+                                apr = st.selectbox("Appr", APR_TYPES,
+                                                   key=f"rwy_apr_{set_i}_{j}",
+                                                   label_visibility="collapsed")
+                                if des:
+                                    rwy_data.append((des, apr))
+
+                    col_add, _ = st.columns([1, 3])
+                    with col_add:
+                        if st.button("➕ 4 more runways", key="add_rwy_set"):
+                            st.session_state["rwy_sets"] += 1
+                            st.rerun()
+
+                    # En iyi yaklaşma otomatik
+                    APPR_RANK = {"CAT III":7,"CAT II":6,"ILS":5,"RNP AR":4,"GNSS":3,"RNP":2,"Non-Precision":1,"Circling":0,"—":0}
+                    best_rwy = max(rwy_data, key=lambda r: APPR_RANK.get(r[1],0)) if rwy_data else None
+                    ra_prec = "Yes" if best_rwy and APPR_RANK.get(best_rwy[1],0) >= 3 else "No"
+
+                    # Offset hangi pist
+                    rwy_names = [r[0] for r in rwy_data if r[0]]
+                    ra_offset = st.checkbox("Offset localizer / offset approach in use?", key="ra_off")
+                    ra_offset_rwy = []
+                    if ra_offset and rwy_names:
+                        ra_offset_rwy = st.multiselect("Offset approach — which runway(s)?", rwy_names, key="ra_off_rwy")
+
+                    # Circling otomatik tespit
+                    ra_circling = any(r[1] == "Circling" for r in rwy_data)
+                    ra_circling_rwy = [r[0] for r in rwy_data if r[1] == "Circling"]
+
                     ra_angle = st.selectbox("Best available approach angle?",
                                             ["Normal (< 3.9°)","Elevated (3.9°–4.49°)","Steep (≥ 4.5°) — override risk"],
                                             key="ra_angle")
                     ra_high_da = st.checkbox("Precision DA/DH ≥ 400 ft due to terrain-limited minima?", key="ra_hda",
                                               disabled=(ra_prec == "No"))
                     c3, c4 = st.columns(2)
-                    ra_offset      = c3.checkbox("Offset localizer / offset approach in use?", key="ra_off")
-                    ra_madem       = c4.checkbox("Missed approach / climb gradient above standard?", key="ra_mad")
-                    ra_oei_ma      = st.checkbox("Engine-out go-around requires dedicated crew briefing?", key="ra_oema")
+                    ra_madem  = c3.checkbox("Missed approach / climb gradient above standard?", key="ra_mad")
+                    ra_oei_ma = c4.checkbox("Engine-out go-around requires dedicated crew briefing?", key="ra_oema")
 
                     st.markdown('<div class="ra-block"><h4>🛬 Block 3 — Runway & Physical</h4></div>', unsafe_allow_html=True)
                     ra_rwy_w = st.selectbox("Runway width?", ["≥ 45 m","30–44 m","< 30 m"], key="ra_rwyw")
@@ -918,6 +960,11 @@ with st.expander("⚙", expanded=False):
                             'sp_crew':     ra_sp_crew,
                             'sp_approval': ra_sp_approval,
                             'prec':        ra_prec == "Yes",
+                            'rwy_data':    rwy_data,
+                            'best_rwy':    best_rwy,
+                            'offset_rwys': ra_offset_rwy,
+                            'circling':    ra_circling,
+                            'circling_rwys': ra_circling_rwy,
                             'angle':       angle_map[ra_angle],
                             'high_da':     ra_high_da if ra_prec == "Yes" else False,
                             'offset':      ra_offset,
