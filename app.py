@@ -2,7 +2,7 @@ import streamlit as st
 import datetime, io, os, json, smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from utils import load_db, update_airport
+from utils import load_db, update_airport, debug_db_info
 from czib_check import check_czib
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -828,6 +828,13 @@ with st.expander("⚙", expanded=False):
 
         tab1, tab2 = st.tabs(["✈ Meydan", "👤 Pilotlar"])
 
+        # ── DB DURUM GÖSTERGESI ──────────────────────────────────────────────
+        with st.expander("🔍 Veritabanı Durumu", expanded=False):
+            st.caption(debug_db_info())
+            if st.button("🔄 DB Bağlantısını Test Et", use_container_width=True):
+                load_db.clear()
+                st.rerun()
+
         # ── TAB 1: MEYDAN ──────────────────────────────────────────────────
         with tab1:
             # ── ICAO SELECTION ──
@@ -895,8 +902,9 @@ with st.expander("⚙", expanded=False):
                     if icao_e:
                         lines = [l.strip() for l in summary_e.split("\n") if l.strip()]
                         ok = update_airport(icao_e, {
-                            "category": cat_e,
-                            "section1": summary_e,
+                            "name":             name_e,   # FIX: meydan adı artık kaydediliyor
+                            "category":         cat_e,
+                            "section1":         summary_e,
                             "ra_briefing_items": lines,
                         })
                         if ok:
@@ -1146,6 +1154,7 @@ with st.expander("⚙", expanded=False):
                             today_str = datetime.date.today().strftime("%Y-%m-%d")
                             due_str   = (datetime.date.today().replace(year=datetime.date.today().year + 1)).strftime("%Y-%m-%d")
                             ok = update_airport(icao_e, {
+                                "name":               name_e,   # FIX: meydan adı artık kaydediliyor
                                 "category":           ra_cat,
                                 "ra_risk_level":      result['risk'],
                                 "ra_risk_score":      result['score'],
