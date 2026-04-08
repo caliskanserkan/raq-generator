@@ -17,6 +17,7 @@ st.set_page_config(
 st.markdown("""
 <style>
 #MainMenu { visibility: hidden; }
+input[type="text"], textarea { text-transform: uppercase !important; }
 footer { visibility: hidden; }
 [data-testid="stToolbar"] { display: none !important; }
 [data-testid="manage-app-button"] { display: none !important; }
@@ -839,7 +840,6 @@ with st.expander("⚙", expanded=False):
 
             if load_btn and icao_e:
                 ap_data = airports.get(icao_e, {})
-                # Load summary: prefer ra_briefing_items, else merge sections
                 if ap_data.get('ra_briefing_items'):
                     loaded_summary = "\n".join(ap_data['ra_briefing_items'])
                 else:
@@ -848,6 +848,17 @@ with st.expander("⚙", expanded=False):
                 st.session_state["edit_name"]    = ap_data.get("name", "")
                 st.session_state["edit_cat"]     = ap_data.get("category", "A")
                 st.session_state["edit_summary"] = loaded_summary
+                # Risk form session state sıfırla — önceki girişler görünmesin
+                for k in ['ra_result','ra_summary','ra_survey','ra_icao',
+                          'rwy_sets','ra_cat','ra_angle','ra_prec','ra_hda',
+                          'ra_off','ra_off_rwy','ra_mad','ra_oema','ra_rwyw',
+                          'ra_rwym','ra_phc','ra_oisid','ra_oigrad','ra_plim',
+                          'ra_lvp','ra_xw','ra_thh','ra_msa_ft','ra_msa_sector',
+                          'ra_atc','ra_mil','ra_gnss','ra_pol','ra_sec',
+                          'ra_usoap','ra_alt','ra_alt_lvp','ra_fuel','ra_crec',
+                          'ra_spd','ra_spc','ra_spa','ra_by']:
+                    if k in st.session_state:
+                        del st.session_state[k]
                 if ap_data: st.success(f"✔ {icao_e} yüklendi — {ap_data.get('name','')}")
                 else:       st.info(f"ℹ {icao_e} yeni meydan.")
 
@@ -886,7 +897,9 @@ with st.expander("⚙", expanded=False):
                         })
                         if ok:
                             st.success(f"✔ {icao_e} kaydedildi!")
-                            airports, risks = load_db()
+                            st.rerun()
+                        else:
+                            st.error("❌ Kayıt başarısız.")
                     else:
                         st.warning("ICAO girin.")
 
@@ -1107,20 +1120,19 @@ with st.expander("⚙", expanded=False):
                         for b in result['basis']:
                             st.caption(f"• {b}")
 
-                        if result['drivers']:
-                            with st.expander("🔍 Key Risk Drivers", expanded=True):
-                                for d in result['drivers']:
-                                    st.markdown(f"**▶** {d}")
-
                         if result['actions']:
                             with st.expander("✅ Recommended Actions", expanded=True):
                                 for i, a in enumerate(result['actions'], 1):
                                     st.markdown(f"**{i}.** {a}")
 
                         if summary:
-                            with st.expander("📄 Briefing Summary (PDF'e işlenecek)", expanded=False):
+                            with st.expander("📄 Briefing Summary (PDF'e işlenecek)", expanded=True):
+                                seen = set()
                                 for item in summary:
-                                    st.markdown(f"• {item}")
+                                    key = item.strip().lower()
+                                    if key not in seen:
+                                        seen.add(key)
+                                        st.markdown(f"• {item}")
 
                         st.markdown("---")
                         if st.button("💾 Sonuçları Veritabanına Kaydet", use_container_width=True, type="primary", key="ra_save"):
