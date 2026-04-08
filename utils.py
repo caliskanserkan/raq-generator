@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json, os, shutil, sqlite3, tempfile
-from pathlib import Path
+import json
 from typing import Any, Dict, Tuple
 
 try:
@@ -9,116 +8,55 @@ try:
 except Exception:
     st = None
 
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GSPREAD_OK = True
+except Exception:
+    GSPREAD_OK = False
+
 JSON_FIELDS = {"ra_risk_basis", "ra_key_drivers", "ra_actions", "ra_briefing_items"}
-
-REQUIRED_COLUMNS = {
-    "icao":               "TEXT PRIMARY KEY",
-    "name":               "TEXT",
-    "category":           "TEXT",
-    "section1":           "TEXT",
-    "section2":           "TEXT",
-    "section3":           "TEXT",
-    "ra_risk_level":      "TEXT",
-    "ra_risk_score":      "REAL",
-    "ra_risk_basis":      "TEXT",
-    "ra_key_drivers":     "TEXT",
-    "ra_actions":         "TEXT",
-    "ra_briefing_items":  "TEXT",
-    "ra_assessment_date": "TEXT",
-    "ra_reassessment_due":"TEXT",
-    "ra_assessed_by":     "TEXT",
-    "ra_ops_approval":    "TEXT",
-    "ra_mitigation":      "TEXT",
-    "survey_last_updated":"TEXT",
-    "survey_updated_by":  "TEXT",
-    "survey_version":     "TEXT",
-    "aip_source_name":    "TEXT",
-    "aip_source_url":     "TEXT",
-    "aip_reference":      "TEXT",
-    "aip_last_checked":   "TEXT",
-}
+SHEET_NAME  = "AIRPORT_DB"
 
 
-def _get_db_path() -> Path:
-    # 1. Streamlit secrets
-    if st is not None:
+@st.cache_resource(show_spinner=False)
+def _get_client():
+    if not GSPREAD_OK:
+        return None
+    try:
+        creds_dict = dict(st.secrets["gcp"])
+        scopes = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        return gspread.authorize(creds)
+    except Exception as e:
+        if st: st.error(f"Google Sheets bağlantı hatası: {e}")
+        return None
+
+
+def _get_sheet():
+    client = _get_client()
+    if not client:
+        return None
+    try:
+        spreadsheet_id = st.secrets["sheets"]["spreadsheet_id"]
+        sh = client.open_by_key(spreadsheet_id)
         try:
-            p = st.secrets.get("database", {}).get("path", "")
-            if p:
-                return Path(p)
-        except Exception:
-            pass
-
-    # 2. Env var
-    p = os.getenv("FBAT_DB_PATH", "").strip()
-    if p:
-        return Path(p)
-
-    # 3. Repo'daki DB — Streamlit Cloud'da read-only olabilir.
-    #    /tmp'ye kopyala (yazılabilir).
-    src = Path(__file__).resolve().parent / "airports.db"
-    tmp_dir = Path(tempfile.gettempdir()) / "fbat_data"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    dst = tmp_dir / "airports.db"
-
-    try:
-        if src.exists():
-            src_mtime = src.stat().st_mtime
-            dst_mtime = dst.stat().st_mtime if dst.exists() else 0
-            if src_mtime > dst_mtime:
-                shutil.copy2(str(src), str(dst))
-        if dst.exists():
-            return dst
-    except Exception:
-        pass
-
-    return src
-
-
-def _connect() -> sqlite3.Connection:
-    db_path = _get_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    return conn
-
-
-def _table_exists(conn, table):
-    return conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-    ).fetchone() is not None
-
-
-def _get_cols(conn, table) -> Dict[str, str]:
-    if not _table_exists(conn, table):
-        return {}
-    return {r["name"]: r["type"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-
-
-def ensure_schema(conn=None):
-    owns = conn is None
-    conn = conn or _connect()
-    try:
-        if not _table_exists(conn, "airports"):
-            col_sql = ", ".join(f"{n} {t}" for n, t in REQUIRED_COLUMNS.items())
-            conn.execute(f"CREATE TABLE airports ({col_sql})")
-        else:
-            existing = _get_cols(conn, "airports")
-            for col, typ in REQUIRED_COLUMNS.items():
-                if col not in existing:
-                    conn.execute(f"ALTER TABLE airports ADD COLUMN {col} {typ}")
-        conn.commit()
-    finally:
-        if owns:
-            conn.close()
+            return sh.worksheet(SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            ws = sh.add_worksheet(title=SHEET_NAME, rows=600, cols=50)
+            return ws
+    except Exception as e:
+        if st: st.error(f"Sheet açma hatası: {e}")
+        return None
 
 
 def _deserialize(key, value):
     if key not in JSON_FIELDS:
         return value
-    if value is None:
+    if not value:
         return []
     if isinstance(value, (list, dict)):
         return value
@@ -135,7 +73,7 @@ def _deserialize(key, value):
 
 def _serialize(key, value):
     if key not in JSON_FIELDS:
-        return value
+        return str(value) if value is not None else ""
     if value is None:
         return json.dumps([])
     if isinstance(value, (list, dict)):
@@ -146,101 +84,84 @@ def _serialize(key, value):
     return json.dumps([])
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_db() -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    conn = _connect()
+    ws = _get_sheet()
+    if ws is None:
+        return {}, {}
     try:
-        ensure_schema(conn)
-        airports, risks = {}, {}
-        for row in conn.execute("SELECT * FROM airports ORDER BY icao").fetchall():
-            data = {k: _deserialize(k, v) for k, v in dict(row).items()}
-            icao = (data.get("icao") or "").upper().strip()
-            if not icao:
-                continue
-            data["icao"] = icao
-            airports[icao] = data
-            if data.get("ra_risk_level"):
-                risks[icao] = {
-                    "risk_level":       data.get("ra_risk_level"),
-                    "score":            data.get("ra_risk_score"),
-                    "basis":            data.get("ra_risk_basis") or [],
-                    "drivers":          data.get("ra_key_drivers") or [],
-                    "actions":          data.get("ra_actions") or [],
-                    "summary":          data.get("ra_briefing_items") or [],
-                    "assessment_date":  data.get("ra_assessment_date"),
-                    "reassessment_due": data.get("ra_reassessment_due"),
-                    "assessed_by":      data.get("ra_assessed_by"),
-                    "survey_last_updated": data.get("survey_last_updated"),
-                    "survey_updated_by":   data.get("survey_updated_by"),
-                    "survey_version":      data.get("survey_version"),
-                }
-        return airports, risks
-    finally:
-        conn.close()
+        all_rows = ws.get_all_records(default_blank="")
+    except Exception as e:
+        if st: st.error(f"Sheets okuma hatası: {e}")
+        return {}, {}
+
+    airports: Dict[str, Dict[str, Any]] = {}
+    risks:    Dict[str, Dict[str, Any]] = {}
+
+    for row in all_rows:
+        icao = str(row.get("icao", "")).upper().strip()
+        if not icao:
+            continue
+        data: Dict[str, Any] = {k: _deserialize(k, v) for k, v in row.items()}
+        if not data.get("name"):
+            data["name"] = data.get("airport_name", "")
+        data["icao"] = icao
+        airports[icao] = data
+
+        if data.get("ra_risk_level"):
+            risks[icao] = {
+                "risk_level":          data.get("ra_risk_level"),
+                "score":               data.get("ra_risk_score"),
+                "basis":               data.get("ra_risk_basis") or [],
+                "drivers":             data.get("ra_key_drivers") or [],
+                "actions":             data.get("ra_actions") or [],
+                "summary":             data.get("ra_briefing_items") or [],
+                "assessment_date":     data.get("ra_assessment_date"),
+                "reassessment_due":    data.get("ra_reassessment_due"),
+                "assessed_by":         data.get("ra_assessed_by"),
+                "survey_last_updated": data.get("survey_last_updated"),
+                "survey_updated_by":   data.get("survey_updated_by"),
+                "survey_version":      data.get("survey_version"),
+            }
+    return airports, risks
 
 
 def update_airport(icao: str, updates: Dict[str, Any]) -> bool:
     icao = (icao or "").upper().strip()
     if not icao:
         return False
-
-    conn = _connect()
+    ws = _get_sheet()
+    if ws is None:
+        return False
     try:
-        ensure_schema(conn)
+        headers = ws.row_values(1)
+        if not headers:
+            return False
 
-        # Yeni kolonlar varsa ekle
-        existing = _get_cols(conn, "airports")
+        # Eksik kolonları başlığa ekle
         for key in updates:
-            if key != "icao" and key not in existing:
-                conn.execute(f"ALTER TABLE airports ADD COLUMN {key} TEXT")
-                existing[key] = "TEXT"
-        conn.commit()
+            if key not in headers:
+                headers.append(key)
+                ws.update_cell(1, len(headers), key)
 
-        # Mevcut satırı çek
-        cur = conn.execute("SELECT * FROM airports WHERE icao=?", (icao,)).fetchone()
+        icao_col = headers.index("icao") + 1
+        cell = ws.find(icao, in_column=icao_col)
 
-        if cur:
-            # UPDATE — sadece gelen alanları değiştir
-            set_parts, vals = [], []
-            for key, val in updates.items():
-                if key == "icao":
-                    continue
-                set_parts.append(f"{key} = ?")
-                vals.append(_serialize(key, val))
-            if set_parts:
-                conn.execute(
-                    f"UPDATE airports SET {', '.join(set_parts)} WHERE icao = ?",
-                    vals + [icao]
-                )
+        if cell:
+            row_idx = cell.row
+            existing_vals = ws.row_values(row_idx)
+            existing = {h: (existing_vals[i] if i < len(existing_vals) else "") for i, h in enumerate(headers)}
+            existing.update({k: _serialize(k, v) for k, v in updates.items()})
+            existing["icao"] = icao
+            ws.update(f"A{row_idx}", [[existing.get(h, "") for h in headers]])
         else:
-            # INSERT — yeni meydan
-            all_data = {"icao": icao}
-            all_data.update(updates)
-            cols = [c for c in all_data if c in existing or c == "icao"]
-            vals = [_serialize(c, all_data[c]) for c in cols]
-            conn.execute(
-                f"INSERT INTO airports ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
-                vals
-            )
+            new_row_dict = {"icao": icao}
+            new_row_dict.update({k: _serialize(k, v) for k, v in updates.items()})
+            ws.append_row([new_row_dict.get(h, "") for h in headers])
 
-        conn.commit()
+        load_db.clear()
         return True
 
     except Exception as e:
-        conn.rollback()
-        try:
-            if st:
-                st.error(f"❌ DB Hatası: {e}")
-        except Exception:
-            pass
+        if st: st.error(f"❌ Sheets yazma hatası: {e}")
         return False
-    finally:
-        conn.close()
-
-
-if __name__ == "__main__":
-    conn = _connect()
-    try:
-        ensure_schema(conn)
-        print(f"Schema OK → {_get_db_path()}")
-    finally:
-        conn.close()
