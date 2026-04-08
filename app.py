@@ -314,27 +314,72 @@ def gen_summary_items(s):
     if s.get('sp_desig'):         items.append("Special aerodrome designation — operator procedures apply")
     if s.get('sp_crew'):          items.append("Special crew qualification required")
     if s.get('sp_approval'):      items.append("Special operator approval required for this destination")
-    if not s.get('prec'):         items.append("No precision approach available — non-precision only")
-    elif s.get('prec'):           items.append("Precision approach (ILS / GLS / RNP AR) available")
+    # ── Pist bazlı yaklaşma özeti ──────────────────────────────────────────
+    rwy_data_g = s.get('rwy_data', [])
+    best_rwy   = s.get('best_rwy')
+
+    PRECISION    = {"CAT III", "CAT II", "ILS"}
+    PERFORMANCE  = {"RNP AR", "RNP", "GNSS"}
+    VISUAL       = {"Non-Precision", "Circling"}
+    APPR_RANK    = {"CAT III":7,"CAT II":6,"ILS":5,"RNP AR":4,"GNSS":3,"RNP":2,"Non-Precision":1,"Circling":0,"—":0}
+
+    if rwy_data_g:
+        # En iyi yaklaşma
+        if best_rwy and best_rwy[1] not in ("—",):
+            items.append(f"{best_rwy[1]} available — RWY {best_rwy[0]}")
+
+        # Diğer precision pistler (best hariç, aynı tip olanları grupla)
+        from collections import defaultdict
+        type_to_rwys = defaultdict(list)
+        for rwy, apt in rwy_data_g:
+            if not rwy or apt == "—":
+                continue
+            if best_rwy and rwy == best_rwy[0] and apt == best_rwy[1]:
+                continue  # zaten yazdık
+            type_to_rwys[apt].append(rwy)
+
+        for apt_type in ["CAT III","CAT II","ILS"]:
+            if type_to_rwys[apt_type]:
+                rwys_str = ", ".join(type_to_rwys[apt_type])
+                items.append(f"{apt_type} available — RWY {rwys_str}")
+
+        # Performance-based (GNSS/RNP) — precision değil, ayrıca belirt
+        for apt_type in ["RNP AR","RNP","GNSS"]:
+            if type_to_rwys[apt_type]:
+                rwys_str = ", ".join(type_to_rwys[apt_type])
+                items.append(f"{apt_type} approach (performance-based, not precision ILS) — RWY {rwys_str}")
+
+        # Non-Precision ve Circling — spesifik pist ile
+        for apt_type in ["Non-Precision","Circling"]:
+            if type_to_rwys[apt_type]:
+                rwys_str = ", ".join(type_to_rwys[apt_type])
+                items.append(f"⚠ {apt_type} approach only — RWY {rwys_str}")
+    else:
+        # Pist girilmemişse genel yaklaşma bilgisi
+        if not s.get('prec'):
+            items.append("No precision approach available — non-precision only")
+        else:
+            items.append("Precision approach available")
+
     if s.get('angle') == 'steep':    items.append("Steep approach required — angle ≥ 4.5°")
     elif s.get('angle') == 'moderate': items.append("Elevated approach angle — 3.9° to 4.49°")
     if s.get('high_da'):          items.append("Terrain-limited approach minima — DA/DH ≥ 400 ft")
-    # GNSS uyarısı — yaklaşma tipiyle etkileşim
+
+    # GNSS güvenilirlik uyarısı
     gnss = s.get('gnss_risk', 'no')
-    rwy_data_g = s.get('rwy_data', [])
-    gnss_approaches = [r for r in rwy_data_g if r[1] in ('GNSS', 'RNP AR', 'RNP')]
+    gnss_rwys = [r for r in rwy_data_g if r[1] in ('GNSS', 'RNP AR', 'RNP')]
     if gnss == 'active':
-        if gnss_approaches:
-            rwys = ", ".join(r[0] for r in gnss_approaches)
-            items.append(f"⚠ ACTIVE GNSS JAMMING/SPOOFING — RWY {rwys} ({', '.join(r[1] for r in gnss_approaches)}) may be UNRELIABLE — revert to raw data")
+        if gnss_rwys:
+            rstr = ", ".join(r[0] for r in gnss_rwys)
+            items.append(f"⚠ ACTIVE GNSS JAMMING/SPOOFING — RWY {rstr} approaches may be UNRELIABLE — revert to raw data")
         else:
-            items.append("⚠ ACTIVE GNSS JAMMING/SPOOFING reported in area — do NOT rely on GNSS; use raw data (VOR/DME/ILS)")
+            items.append("⚠ ACTIVE GNSS JAMMING/SPOOFING reported — do NOT rely on GNSS; use raw data (VOR/DME/ILS)")
     elif gnss == 'notam':
-        if gnss_approaches:
-            rwys = ", ".join(r[0] for r in gnss_approaches)
-            items.append(f"GNSS reliability concern (NOTAM) — RWY {rwys}: {', '.join(r[1] for r in gnss_approaches)} — cross-check raw data")
+        if gnss_rwys:
+            rstr = ", ".join(r[0] for r in gnss_rwys)
+            items.append(f"GNSS reliability concern (NOTAM) — RWY {rstr} — cross-check raw data; degradation possible")
         else:
-            items.append("GNSS / GPS reliability concern — NOTAM active or interference reported; cross-check raw data")
+            items.append("GNSS / GPS reliability concern (NOTAM) — cross-check raw data")
 
     if s.get('offset'):           items.append("Offset localizer / offset approach procedure in use")
     if s.get('madem'):            items.append("Demanding missed approach gradient — special briefing required")
