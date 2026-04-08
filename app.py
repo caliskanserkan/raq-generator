@@ -2,7 +2,49 @@ import streamlit as st
 import datetime, io, os, json, smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from utils import load_db, update_airport, run_diagnostics
+from utils import load_db, update_airport
+
+# ── Inline diagnostics — utils.py'ye bağımlı değil ───────────────────────────
+def run_diagnostics():
+    result = {"gspread_ok":False,"client_ok":False,"sheet_ok":False,
+              "row_count":0,"icao_codes":[],"headers":[],"sheet_tabs":[],"error":None}
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        result["gspread_ok"] = True
+    except Exception as e:
+        result["error"] = f"gspread yüklü değil: {e}"; return result
+    try:
+        creds_dict = dict(st.secrets["gcp"])
+        scopes = ["https://spreadsheets.google.com/feeds",
+                  "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        client = gspread.authorize(creds)
+        result["client_ok"] = True
+    except Exception as e:
+        result["error"] = f"Google auth hatası: {e}"; return result
+    try:
+        sid = st.secrets["sheets"]["spreadsheet_id"]
+        sh  = client.open_by_key(sid)
+        result["sheet_tabs"] = [ws.title for ws in sh.worksheets()]
+    except Exception as e:
+        result["error"] = f"Spreadsheet açılamadı: {e}"; return result
+    SNAME = "AIRPORT_DB"
+    if SNAME not in result["sheet_tabs"]:
+        result["error"] = f"'{SNAME}' sekmesi yok. Mevcut: {result['sheet_tabs']}"; return result
+    ws = sh.worksheet(SNAME); result["sheet_ok"] = True
+    try:
+        raw = ws.get_all_values()
+        result["row_count"] = max(0, len(raw)-1)
+        if raw:
+            result["headers"] = [h.lower().strip() for h in raw[0]]
+            for row in raw[1:]:
+                if row and len(row) > 0:
+                    icao = str(row[result["headers"].index("icao")] if "icao" in result["headers"] else "").upper().strip()
+                    if icao: result["icao_codes"].append(icao)
+    except Exception as e:
+        result["error"] = f"Veri okuma hatası: {e}"
+    return result
 from czib_check import check_czib
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -828,28 +870,24 @@ with st.expander("⚙", expanded=False):
 
         tab1, tab2 = st.tabs(["✈ Meydan", "👤 Pilotlar"])
 
-        # ── BAĞLANTI TANI PANELİ ────────────────────────────────────────────
         with st.expander("🔍 Veritabanı Bağlantı Testi", expanded=True):
             if st.button("🧪 Bağlantıyı Test Et", use_container_width=True):
                 with st.spinner("Test ediliyor..."):
                     d = run_diagnostics()
-
-                col_a, col_b, col_c = st.columns(3)
-                col_a.metric("gspread paketi", "✅" if d["gspread_ok"] else "❌")
-                col_b.metric("Google Auth",    "✅" if d["client_ok"]  else "❌")
-                col_c.metric("Sheet bağlantı","✅" if d["sheet_ok"]   else "❌")
-
+                c1, c2, c3 = st.columns(3)
+                c1.metric("gspread", "✅" if d["gspread_ok"] else "❌")
+                c2.metric("Google Auth", "✅" if d["client_ok"] else "❌")
+                c3.metric("Sheet", "✅" if d["sheet_ok"] else "❌")
                 if d["error"]:
                     st.error(f"**HATA:** {d['error']}")
                 else:
-                    st.success(f"✔ Bağlantı OK — {d['row_count']} satır okundu")
+                    st.success(f"✔ Bağlantı OK — {d['row_count']} satır")
                     st.caption(f"Sekmeler: {d['sheet_tabs']}")
-                    st.caption(f"Sütun başlıkları: {d['headers']}")
+                    st.caption(f"Sütunlar: {d['headers']}")
                     if d["icao_codes"]:
-                        st.info(f"Yüklenen ICAO kodları: **{', '.join(d['icao_codes'])}**")
+                        st.info(f"ICAO kodları: **{', '.join(d['icao_codes'])}**")
                     else:
-                        st.warning("⚠ Hiç ICAO kodu okunamadı — 'icao' sütunu boş veya sütun adı farklı olabilir.")
-
+                        st.warning("⚠ Hiç ICAO kodu okunamadı — 'icao' sütun adını kontrol et.")
             if st.button("🔄 Cache Temizle & Yenile", use_container_width=True):
                 load_db.clear()
                 st.rerun()
