@@ -54,12 +54,10 @@ COL_MAP = {
 }
 
 
-# ── FIX 1: @st.cache_resource KALDIRILDI
-# Eski haliyle bağlantı bir kez None döndüğünde kalıcı olarak önbellekte
-# kalıyordu ve bir daha düzelmiyordu. Artık her çağrıda taze client oluşturuluyor.
 def _get_client():
+    """Her seferinde taze client — önbelleğe ALINMAZ."""
     if not GSPREAD_OK:
-        return None
+        return None, "gspread veya google-auth paketi yüklü değil."
     try:
         creds_dict = dict(st.secrets["gcp"])
         scopes = [
@@ -67,25 +65,31 @@ def _get_client():
             "https://www.googleapis.com/auth/drive",
         ]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-        return gspread.authorize(creds)
+        return gspread.authorize(creds), None
+    except KeyError:
+        return None, "secrets.toml içinde [gcp] bölümü bulunamadı."
     except Exception as e:
-        if st:
-            st.error(f"Google Sheets bağlantı hatası: {e}")
-        return None
+        return None, f"Google auth hatası: {e}"
 
 
 def _get_sheet():
-    client = _get_client()
+    client, err = _get_client()
     if not client:
-        return None
+        return None, err
     try:
         spreadsheet_id = st.secrets["sheets"]["spreadsheet_id"]
         sh = client.open_by_key(spreadsheet_id)
-        return sh.worksheet(SHEET_NAME)
+        all_titles = [ws.title for ws in sh.worksheets()]
+        if SHEET_NAME not in all_titles:
+            return None, (
+                f"'{SHEET_NAME}' sekmesi bulunamadı. "
+                f"Mevcut sekmeler: {all_titles}"
+            )
+        return sh.worksheet(SHEET_NAME), None
+    except KeyError:
+        return None, "secrets.toml içinde [sheets]/spreadsheet_id bulunamadı."
     except Exception as e:
-        if st:
-            st.error(f"Sheet açma hatası: {e}  (AIRPORT_DB sekmesi mevcut mu?)")
-        return None
+        return None, f"Sheet açma hatası: {e}"
 
 
 def _deserialize(key, value):
@@ -119,28 +123,18 @@ def _serialize(key, value):
     return json.dumps([])
 
 
-# ── FIX 2: load_db artık BAŞARISIZ sonucu önbelleğe almıyor.
-# Bağlantı geçici olarak başarısız olduğunda 60 saniye boyunca boş DB
-# dönüyordu ve tüm meydanlar "yeni meydan" görünüyordu.
 @st.cache_data(ttl=60, show_spinner=False)
 def load_db() -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    ws = _get_sheet()
+    ws, err = _get_sheet()
     if ws is None:
-        load_db.clear()   # Başarısız sonucu önbelleğe alma
         return {}, {}
     try:
         raw = ws.get_all_values()
         if not raw:
-            load_db.clear()
             return {}, {}
-
         raw_headers = [h.lower().strip() for h in raw[0]]
         norm_headers = [COL_MAP.get(h, h) for h in raw_headers]
-
-    except Exception as e:
-        if st:
-            st.error(f"Sheets okuma hatası: {e}")
-        load_db.clear()
+    except Exception:
         return {}, {}
 
     airports: Dict[str, Dict[str, Any]] = {}
@@ -156,8 +150,6 @@ def load_db() -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
             continue
 
         data: Dict[str, Any] = {k: _deserialize(k, v) for k, v in row_dict.items()}
-
-        # Hem "name" hem "airport_name" sütununu kontrol et
         if not data.get("name"):
             data["name"] = data.get("airport_name", "")
         data["icao"] = icao
@@ -186,8 +178,10 @@ def update_airport(icao: str, updates: Dict[str, Any]) -> bool:
     icao = (icao or "").upper().strip()
     if not icao:
         return False
-    ws = _get_sheet()
+    ws, err = _get_sheet()
     if ws is None:
+        if st and err:
+            st.error(f"❌ Bağlantı hatası: {err}")
         return False
     try:
         raw = ws.get_all_values()
@@ -200,23 +194,20 @@ def update_airport(icao: str, updates: Dict[str, Any]) -> bool:
             for h in raw_headers
         ]
 
-        # Eksik kolonları ekle
         for key in updates:
             if key not in norm_headers:
                 norm_headers.append(key)
                 raw_headers.append(key)
                 ws.update_cell(1, len(raw_headers), key)
 
-        # ICAO sütun varlık kontrolü
         if "icao" not in norm_headers:
             if st:
                 st.error("❌ Sheets'te 'icao' sütunu bulunamadı!")
             return False
 
         icao_idx = norm_headers.index("icao")
-        icao_col = icao_idx + 1  # 1-indexed
+        icao_col = icao_idx + 1
 
-        # Satırı bul
         cell = ws.find(icao, in_column=icao_col)
 
         if cell:
@@ -243,13 +234,60 @@ def update_airport(icao: str, updates: Dict[str, Any]) -> bool:
         return False
 
 
-def debug_db_info() -> str:
-    """Admin paneli için DB durumu özeti döndürür."""
+def run_diagnostics() -> dict:
+    """Bağlantıyı adım adım test eder — admin debug paneli için."""
+    result = {
+        "gspread_ok": False,
+        "client_ok":  False,
+        "sheet_ok":   False,
+        "row_count":  0,
+        "icao_codes": [],
+        "headers":    [],
+        "sheet_tabs": [],
+        "error":      None,
+    }
+
+    if not GSPREAD_OK:
+        result["error"] = "gspread paketi yüklü değil."
+        return result
+    result["gspread_ok"] = True
+
+    client, err = _get_client()
+    if not client:
+        result["error"] = err
+        return result
+    result["client_ok"] = True
+
     try:
-        airports, _ = load_db()
-        if not airports:
-            return "⚠ Veritabanı boş veya bağlantı yok."
-        icao_list = sorted(airports.keys())
-        return f"✔ {len(icao_list)} meydan yüklendi: {', '.join(icao_list)}"
+        spreadsheet_id = st.secrets["sheets"]["spreadsheet_id"]
+        sh = client.open_by_key(spreadsheet_id)
+        result["sheet_tabs"] = [ws.title for ws in sh.worksheets()]
     except Exception as e:
-        return f"❌ Hata: {e}"
+        result["error"] = f"Spreadsheet açılamadı: {e}"
+        return result
+
+    if SHEET_NAME not in result["sheet_tabs"]:
+        result["error"] = (
+            f"'{SHEET_NAME}' sekmesi bulunamadı. "
+            f"Mevcut sekmeler: {result['sheet_tabs']}"
+        )
+        return result
+
+    ws = sh.worksheet(SHEET_NAME)
+    result["sheet_ok"] = True
+
+    try:
+        raw = ws.get_all_values()
+        result["row_count"] = max(0, len(raw) - 1)
+        if raw:
+            result["headers"] = [h.lower().strip() for h in raw[0]]
+            norm_h = [COL_MAP.get(h, h) for h in result["headers"]]
+            for row in raw[1:]:
+                row_dict = {norm_h[i]: (row[i] if i < len(row) else "") for i in range(len(norm_h))}
+                icao = str(row_dict.get("icao", "")).upper().strip()
+                if icao:
+                    result["icao_codes"].append(icao)
+    except Exception as e:
+        result["error"] = f"Veri okuma hatası: {e}"
+
+    return result

@@ -2,7 +2,7 @@ import streamlit as st
 import datetime, io, os, json, smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from utils import load_db, update_airport, debug_db_info
+from utils import load_db, update_airport, run_diagnostics
 from czib_check import check_czib
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -828,10 +828,29 @@ with st.expander("⚙", expanded=False):
 
         tab1, tab2 = st.tabs(["✈ Meydan", "👤 Pilotlar"])
 
-        # ── DB DURUM GÖSTERGESI ──────────────────────────────────────────────
-        with st.expander("🔍 Veritabanı Durumu", expanded=False):
-            st.caption(debug_db_info())
-            if st.button("🔄 DB Bağlantısını Test Et", use_container_width=True):
+        # ── BAĞLANTI TANI PANELİ ────────────────────────────────────────────
+        with st.expander("🔍 Veritabanı Bağlantı Testi", expanded=True):
+            if st.button("🧪 Bağlantıyı Test Et", use_container_width=True):
+                with st.spinner("Test ediliyor..."):
+                    d = run_diagnostics()
+
+                col_a, col_b, col_c = st.columns(3)
+                col_a.metric("gspread paketi", "✅" if d["gspread_ok"] else "❌")
+                col_b.metric("Google Auth",    "✅" if d["client_ok"]  else "❌")
+                col_c.metric("Sheet bağlantı","✅" if d["sheet_ok"]   else "❌")
+
+                if d["error"]:
+                    st.error(f"**HATA:** {d['error']}")
+                else:
+                    st.success(f"✔ Bağlantı OK — {d['row_count']} satır okundu")
+                    st.caption(f"Sekmeler: {d['sheet_tabs']}")
+                    st.caption(f"Sütun başlıkları: {d['headers']}")
+                    if d["icao_codes"]:
+                        st.info(f"Yüklenen ICAO kodları: **{', '.join(d['icao_codes'])}**")
+                    else:
+                        st.warning("⚠ Hiç ICAO kodu okunamadı — 'icao' sütunu boş veya sütun adı farklı olabilir.")
+
+            if st.button("🔄 Cache Temizle & Yenile", use_container_width=True):
                 load_db.clear()
                 st.rerun()
 
@@ -902,7 +921,7 @@ with st.expander("⚙", expanded=False):
                     if icao_e:
                         lines = [l.strip() for l in summary_e.split("\n") if l.strip()]
                         ok = update_airport(icao_e, {
-                            "name":             name_e,   # FIX: meydan adı artık kaydediliyor
+                            "name":             name_e,
                             "category":         cat_e,
                             "section1":         summary_e,
                             "ra_briefing_items": lines,
@@ -1154,7 +1173,7 @@ with st.expander("⚙", expanded=False):
                             today_str = datetime.date.today().strftime("%Y-%m-%d")
                             due_str   = (datetime.date.today().replace(year=datetime.date.today().year + 1)).strftime("%Y-%m-%d")
                             ok = update_airport(icao_e, {
-                                "name":               name_e,   # FIX: meydan adı artık kaydediliyor
+                                "name":               name_e,
                                 "category":           ra_cat,
                                 "ra_risk_level":      result['risk'],
                                 "ra_risk_score":      result['score'],
