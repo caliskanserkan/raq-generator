@@ -1,4 +1,6 @@
 streamlit
+gspread
+google-auth
+google-auth-oauthlib
 reportlab
 requests
-beautifulsoup4
