@@ -838,6 +838,10 @@ with st.expander("⚙", expanded=False):
                 st.markdown("<br>", unsafe_allow_html=True)
                 load_btn = st.button("📂 Yükle", use_container_width=True)
 
+            # Kayıt başarı mesajı (rerun sonrası göster)
+            if "save_ok_msg" in st.session_state:
+                st.success(st.session_state.pop("save_ok_msg"))
+
             if load_btn and icao_e:
                 ap_data = airports.get(icao_e, {})
                 if ap_data.get('ra_briefing_items'):
@@ -896,12 +900,15 @@ with st.expander("⚙", expanded=False):
                             "ra_briefing_items": lines,
                         })
                         if ok:
-                            st.success(f"✔ {icao_e} kaydedildi!")
+                            st.session_state["save_ok_msg"] = f"✔ {icao_e} kaydedildi!"
                             st.rerun()
                         else:
                             st.error("❌ Kayıt başarısız.")
                     else:
                         st.warning("ICAO girin.")
+                # Kayıt başarı mesajını göster
+                if "save_ok_msg" in st.session_state:
+                    st.success(st.session_state.pop("save_ok_msg"))
 
             # ══════════════════════════════════════════════════════════════
             # OPTION 2 — RISK ASSESSMENT TOOL
@@ -1151,7 +1158,7 @@ with st.expander("⚙", expanded=False):
                                 "ra_assessed_by":     assessed_by or "Admin",
                             })
                             if ok:
-                                st.success(f"✔ {icao_e} risk değerlendirmesi kaydedildi! Yeniden değerlendirme: {due_str}")
+                                st.session_state["save_ok_msg"] = f"✔ {icao_e} risk değerlendirmesi kaydedildi! Yeniden değerlendirme: {due_str}"
                                 for k in ['ra_result','ra_summary','ra_survey','ra_icao']:
                                     if k in st.session_state: del st.session_state[k]
                                 st.rerun()
