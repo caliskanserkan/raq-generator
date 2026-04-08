@@ -90,7 +90,12 @@ def load_db() -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     if ws is None:
         return {}, {}
     try:
-        all_rows = ws.get_all_records(default_blank="")
+        raw = ws.get_all_values()
+        if not raw:
+            return {}, {}
+        # Başlık satırını küçük harfe çevir
+        headers = [h.lower().strip() for h in raw[0]]
+        all_rows = [dict(zip(headers, row)) for row in raw[1:]]
     except Exception as e:
         if st: st.error(f"Sheets okuma hatası: {e}")
         return {}, {}
