@@ -865,6 +865,8 @@ st.caption("© Flight Briefing and Awareness Tool  –  AMC1 ORO.FC.105 b(2);c")
 # ADMIN PANEL
 # ══════════════════════════════════════════════════════════════════════════════
 def reset_ra_form():
+    # Reset counter — tüm widget key'leri değişir, Streamlit sıfırdan render eder
+    st.session_state["ra_reset_counter"] = st.session_state.get("ra_reset_counter", 0) + 1
     """Risk Assessment formundaki tüm alanları sıfırla."""
     static_keys = [
         'ra_result','ra_summary','ra_survey','ra_icao',
@@ -1002,16 +1004,19 @@ with st.expander("⚙", expanded=False):
                 if not icao_e:
                     st.info("ℹ Yukarıdan ICAO kodunu girin ve Yükle'ye tıklayın.")
                 else:
-                    assessed_by = st.text_input("Değerlendiren (isim / callsign)", key="ra_by")
+                    # rc = reset counter — her sıfırlamada tüm key'ler değişir
+                    rc = st.session_state.get("ra_reset_counter", 0)
+
+                    assessed_by = st.text_input("Değerlendiren (isim / callsign)", key=f"ra_by_{rc}")
 
                     st.markdown("---")
                     st.markdown('<div class="ra-block"><h4>🏛 Block 1 — Aerodrome Classification</h4></div>', unsafe_allow_html=True)
-                    ra_cat = st.selectbox("Aerodrome category?", ["A","B","C"], key="ra_cat",
+                    ra_cat = st.selectbox("Aerodrome category?", ["A","B","C"], key=f"ra_cat_{rc}",
                                           help="CAT C → otomatik HIGH override")
                     c1, c2 = st.columns(2)
-                    ra_sp_desig    = c1.checkbox("Special aerodrome designation applies?", key="ra_spd")
-                    ra_sp_crew     = c2.checkbox("Special crew qualification required?", key="ra_spc")
-                    ra_sp_approval = st.checkbox("Special operator approval required for this destination?", key="ra_spa")
+                    ra_sp_desig    = c1.checkbox("Special aerodrome designation applies?", key=f"ra_spd_{rc}")
+                    ra_sp_crew     = c2.checkbox("Special crew qualification required?", key=f"ra_spc_{rc}")
+                    ra_sp_approval = st.checkbox("Special operator approval required for this destination?", key=f"ra_spa_{rc}")
 
                     st.markdown('<div class="ra-block"><h4>📐 Block 2 — Runway & Approach</h4></div>', unsafe_allow_html=True)
 
@@ -1019,28 +1024,29 @@ with st.expander("⚙", expanded=False):
                     st.caption("Active runways and approach types / Aktif pistler ve yaklaşma tipleri")
                     APR_TYPES = ["—","CAT III","CAT II","ILS","GNSS","RNP AR","RNP","Non-Precision","Circling"]
 
-                    if "rwy_sets" not in st.session_state:
-                        st.session_state["rwy_sets"] = 1
+                    rwy_sets_key = f"rwy_sets_{rc}"
+                    if rwy_sets_key not in st.session_state:
+                        st.session_state[rwy_sets_key] = 1
 
                     rwy_data = []
-                    for set_i in range(st.session_state["rwy_sets"]):
+                    for set_i in range(st.session_state[rwy_sets_key]):
                         cols4 = st.columns(4)
                         for j in range(4):
                             slot = set_i * 4 + j
                             with cols4[j]:
                                 des = st.text_input(f"RWY {slot+1}", max_chars=4,
-                                                    key=f"rwy_des_{set_i}_{j}",
+                                                    key=f"rwy_des_{rc}_{set_i}_{j}",
                                                     placeholder="09R").upper().strip()
                                 apr = st.selectbox("Appr", APR_TYPES,
-                                                   key=f"rwy_apr_{set_i}_{j}",
+                                                   key=f"rwy_apr_{rc}_{set_i}_{j}",
                                                    label_visibility="collapsed")
                                 if des:
                                     rwy_data.append((des, apr))
 
                     col_add, _ = st.columns([1, 3])
                     with col_add:
-                        if st.button("➕ 4 more runways", key="add_rwy_set"):
-                            st.session_state["rwy_sets"] += 1
+                        if st.button("➕ 4 more runways", key=f"add_rwy_set_{rc}"):
+                            st.session_state[rwy_sets_key] += 1
                             st.rerun()
 
                     # En iyi yaklaşma otomatik
@@ -1050,10 +1056,10 @@ with st.expander("⚙", expanded=False):
 
                     # Offset hangi pist
                     rwy_names = [r[0] for r in rwy_data if r[0]]
-                    ra_offset = st.checkbox("Offset localizer / offset approach in use?", key="ra_off")
+                    ra_offset = st.checkbox("Offset localizer / offset approach in use?", key=f"ra_off_{rc}")
                     ra_offset_rwy = []
                     if ra_offset and rwy_names:
-                        ra_offset_rwy = st.multiselect("Offset approach — which runway(s)?", rwy_names, key="ra_off_rwy")
+                        ra_offset_rwy = st.multiselect("Offset approach — which runway(s)?", rwy_names, key=f"ra_off_rwy_{rc}")
 
                     # Circling otomatik tespit
                     ra_circling = any(r[1] == "Circling" for r in rwy_data)
@@ -1067,130 +1073,130 @@ with st.expander("⚙", expanded=False):
                                                 "Elevated (3.9° – 4.49°)",
                                                 "Steep (≥ 4.5°) — override risk",
                                             ],
-                                            key="ra_angle")
+                                            key=f"ra_angle_{rc}")
                     ra_angle_rwy = ""
                     if ra_angle != "Normal (≤ 3.0°)" and rwy_names:
                         ra_angle_rwy = st.selectbox(
                             "Which runway does this apply to?",
-                            [""] + rwy_names, key="ra_angle_rwy",
+                            [""] + rwy_names, key=f"ra_angle_rwy_{rc}",
                             help="Non-standard glide path — select the affected runway"
                         )
                     elif ra_angle != "Normal (≤ 3.0°)":
-                        ra_angle_rwy = st.text_input("Which runway? (e.g. 09R)", max_chars=4, key="ra_angle_rwy_txt").upper().strip()
-                    ra_high_da = st.checkbox("Precision DA/DH ≥ 400 ft due to terrain-limited minima?", key="ra_hda",
+                        ra_angle_rwy = st.text_input("Which runway? (e.g. 09R)", max_chars=4, key=f"ra_angle_rwy_txt_{rc}").upper().strip()
+                    ra_high_da = st.checkbox("Precision DA/DH ≥ 400 ft due to terrain-limited minima?", key=f"ra_hda_{rc}",
                                               disabled=(ra_prec == "No"))
                     c3, c4 = st.columns(2)
-                    ra_madem  = c3.checkbox("Missed approach / climb gradient above standard?", key="ra_mad")
-                    ra_oei_ma = c4.checkbox("Engine-out go-around requires dedicated crew briefing?", key="ra_oema")
+                    ra_madem  = c3.checkbox("Missed approach / climb gradient above standard?", key=f"ra_mad_{rc}")
+                    ra_oei_ma = c4.checkbox("Engine-out go-around requires dedicated crew briefing?", key=f"ra_oema_{rc}")
 
                     st.markdown('<div class="ra-block"><h4>🛬 Block 3 — Runway & Physical</h4></div>', unsafe_allow_html=True)
-                    ra_rwy_w = st.selectbox("Runway width?", ["≥ 45 m","30–44 m","< 30 m"], key="ra_rwyw")
+                    ra_rwy_w = st.selectbox("Runway width?", ["≥ 45 m","30–44 m","< 30 m"], key=f"ra_rwyw_{rc}")
                     c5, c6 = st.columns(2)
-                    ra_rwy_marg  = c5.checkbox("Runway length marginal for planned operation?", key="ra_rwym")
-                    ra_phys_comp = c6.checkbox("Physical complexity? (slope / displaced threshold / offset LOC)", key="ra_phc")
+                    ra_rwy_marg  = c5.checkbox("Runway length marginal for planned operation?", key=f"ra_rwym_{rc}")
+                    ra_phys_comp = c6.checkbox("Physical complexity? (slope / displaced threshold / offset LOC)", key=f"ra_phc_{rc}")
 
                     st.markdown('<div class="ra-block"><h4>⚡ Block 4 — Departure & OEI</h4></div>', unsafe_allow_html=True)
                     c7, c8, c9 = st.columns(3)
-                    ra_oei_sid  = c7.checkbox("Special OEI SID required?", key="ra_oisid")
-                    ra_oei_grad = c8.checkbox("OEI gradient demanding?", key="ra_oigrad")
-                    ra_perf_lim = c9.checkbox("Performance-limited departure?", key="ra_plim")
+                    ra_oei_sid  = c7.checkbox("Special OEI SID required?", key=f"ra_oisid_{rc}")
+                    ra_oei_grad = c8.checkbox("OEI gradient demanding?", key=f"ra_oigrad_{rc}")
+                    ra_perf_lim = c9.checkbox("Performance-limited departure?", key=f"ra_plim_{rc}")
                     ra_oei_rwys = []
                     if ra_oei_sid or ra_oei_grad or ra_perf_lim:
                         if rwy_names:
                             ra_oei_rwys = st.multiselect(
                                 "Which runway(s) does this apply to?",
-                                rwy_names, key="ra_oei_rwys",
+                                rwy_names, key=f"ra_oei_rwys_{rc}",
                                 help="Select all departure runways affected by OEI / performance constraints"
                             )
                         else:
-                            _oei_rwy_txt = st.text_input("Which runway? (e.g. 09R)", max_chars=4, key="ra_oei_rwy_txt").upper().strip()
+                            _oei_rwy_txt = st.text_input("Which runway? (e.g. 09R)", max_chars=4, key=f"ra_oei_rwy_txt_{rc}").upper().strip()
                             if _oei_rwy_txt:
                                 ra_oei_rwys = [_oei_rwy_txt]
 
                     st.markdown('<div class="ra-block"><h4>🌤 Block 5 — Weather & Environment</h4></div>', unsafe_allow_html=True)
                     ra_lvp = st.selectbox("Frequency of LVP / fog / low ceiling?",
                                           ["Rarely / not significant","Occasional","Frequent"],
-                                          key="ra_lvp")
+                                          key=f"ra_lvp_{rc}")
                     c10, c11 = st.columns(2)
-                    ra_xw_risk = c10.checkbox("Crosswind / windshear / contamination risk significant?", key="ra_xw")
-                    ra_terr_hh = c11.checkbox("Significant terrain / mountain wave / hot-high?", key="ra_thh")
+                    ra_xw_risk = c10.checkbox("Crosswind / windshear / contamination risk significant?", key=f"ra_xw_{rc}")
+                    ra_terr_hh = c11.checkbox("Significant terrain / mountain wave / hot-high?", key=f"ra_thh_{rc}")
 
                     c_msa1, c_msa2 = st.columns(2)
                     ra_msa_ft = c_msa1.number_input(
                         "Maximum Sector Altitude / MSA (ft)", min_value=0, max_value=25000,
-                        value=0, step=100, key="ra_msa_ft",
+                        value=0, step=100, key=f"ra_msa_ft_{rc}",
                         help="Enter the highest MSA in the TMA/route area. 0 = not applicable."
                     )
                     ra_msa_sector = c_msa2.selectbox(
                         "MSA sector", ["All sectors", "Specific sector (worst case)", "Enroute MEA/MORA"],
-                        key="ra_msa_sector"
+                        key=f"ra_msa_sector_{rc}"
                     )
 
                     st.markdown('<div class="ra-block"><h4>📡 Block 6 — ATC & Operational Complexity</h4></div>', unsafe_allow_html=True)
                     ra_atc = st.selectbox("ATC / slot / taxi complexity?",
-                                          ["Low / normal","Moderate","Significant"], key="ra_atc")
+                                          ["Low / normal","Moderate","Significant"], key=f"ra_atc_{rc}")
                     ra_atc_details = []
                     if ra_atc in ("Moderate", "Significant"):
                         st.caption("Select all contributing factors:")
                         _atc_c1, _atc_c2 = st.columns(2)
-                        _atc_freq   = _atc_c1.checkbox("High frequency workload / congested frequency", key="ra_atc_freq")
-                        _atc_accent = _atc_c2.checkbox("Accent / non-standard phraseology issues", key="ra_atc_accent")
-                        _atc_space  = _atc_c1.checkbox("Complex / busy airspace structure", key="ra_atc_space")
-                        _atc_taxi   = _atc_c2.checkbox("Complex taxi routing / hot spots", key="ra_atc_taxi")
+                        _atc_freq   = _atc_c1.checkbox("High frequency workload / congested frequency", key=f"ra_atc_freq_{rc}")
+                        _atc_accent = _atc_c2.checkbox("Accent / non-standard phraseology issues", key=f"ra_atc_accent_{rc}")
+                        _atc_space  = _atc_c1.checkbox("Complex / busy airspace structure", key=f"ra_atc_space_{rc}")
+                        _atc_taxi   = _atc_c2.checkbox("Complex taxi routing / hot spots", key=f"ra_atc_taxi_{rc}")
                         if _atc_freq:   ra_atc_details.append("congested frequency")
                         if _atc_accent: ra_atc_details.append("accent / phraseology")
                         if _atc_space:  ra_atc_details.append("complex airspace")
                         if _atc_taxi:   ra_atc_details.append("complex taxi / hot spots")
-                    ra_mil_traff = st.checkbox("Military / mixed traffic or unusual ATC phraseology?", key="ra_mil")
+                    ra_mil_traff = st.checkbox("Military / mixed traffic or unusual ATC phraseology?", key=f"ra_mil_{rc}")
 
                     ra_gnss = st.selectbox(
                         "GNSS / GPS signal reliability?",
                         ["No known risk", "NOTAM'd / interference expected", "Active jamming / spoofing reported"],
-                        key="ra_gnss",
+                        key=f"ra_gnss_{rc}",
                         help="If GNSS or RNP approach is selected and reliability is in question, a warning will be generated in the briefing summary."
                     )
 
                     st.markdown('<div class="ra-block"><h4>🔐 Block 7 — Security, State & Oversight</h4></div>', unsafe_allow_html=True)
                     ra_pol_risk = st.selectbox("Political / security risk?",
                                                ["No significant concern","Caution advisories in effect","High risk — AUTO OVERRIDE HIGH"],
-                                               key="ra_pol")
+                                               key=f"ra_pol_{rc}")
                     ra_arpt_sec = st.selectbox("Airport security / handling standards?",
                                                ["Adequate / reliable","Uncertain / inconsistent","Poor / inadequate"],
-                                               key="ra_sec")
+                                               key=f"ra_sec_{rc}")
                     ra_st_oversight = st.selectbox("State safety oversight / ICAO USOAP compliance?",
                                                     ["Acceptable (EASA or equivalent)","Partial — concerns noted","No / inadequate / unrecognised"],
-                                                    key="ra_usoap")
+                                                    key=f"ra_usoap_{rc}")
 
                     st.markdown('<div class="ra-block"><h4>⛽ Block 8 — Alternate, Fuel & Crew</h4></div>', unsafe_allow_html=True)
                     ra_alt = st.selectbox("Adequate alternate within fuel planning range?",
                                           ["Yes — available and suitable","Limited options","No adequate alternate"],
-                                          key="ra_alt")
+                                          key=f"ra_alt_{rc}")
                     ra_fuel = st.selectbox("Fuel quality and ground handling reliability?",
                                            ["Reliable and verified","Uncertain / variable","Poor / known concerns"],
-                                           key="ra_fuel")
+                                           key=f"ra_fuel_{rc}")
                     ra_crew_rec = st.radio("Crew has operated at this aerodrome within the last 12 months?",
-                                           ["Yes","No"], horizontal=True, key="ra_crec")
+                                           ["Yes","No"], horizontal=True, key=f"ra_crec_{rc}")
 
                     st.markdown('<div class="ra-block"><h4>🕐 Block 9 — Curfew</h4></div>', unsafe_allow_html=True)
-                    ra_curfew = st.radio("Is there a curfew at this aerodrome?", ["No","Yes"], horizontal=True, key="ra_curfew")
+                    ra_curfew = st.radio("Is there a curfew at this aerodrome?", ["No","Yes"], horizontal=True, key=f"ra_curfew_{rc}")
                     ra_curfew_open  = ""
                     ra_curfew_close = ""
                     if ra_curfew == "Yes":
                         _cc1, _ccc, _cc2 = st.columns([2, 1, 2])
-                        ra_curfew_open  = _cc1.text_input("Opening time (UTC)", placeholder="0600", max_chars=4, key="ra_curfew_open").strip()
+                        ra_curfew_open  = _cc1.text_input("Opening time (UTC)", placeholder="0600", max_chars=4, key=f"ra_curfew_open_{rc}").strip()
                         _ccc.markdown("<br><div style='text-align:center;font-size:20px;padding-top:6px'>→</div>", unsafe_allow_html=True)
-                        ra_curfew_close = _cc2.text_input("Closing time (UTC)", placeholder="2300", max_chars=4, key="ra_curfew_close").strip()
+                        ra_curfew_close = _cc2.text_input("Closing time (UTC)", placeholder="2300", max_chars=4, key=f"ra_curfew_close_{rc}").strip()
 
                     st.markdown('<div class="ra-block"><h4>📢 Block 10 — NADP (Noise Abatement)</h4></div>', unsafe_allow_html=True)
-                    ra_nadp = st.radio("Is a Noise Abatement Departure Procedure (NADP) required?", ["No","Yes"], horizontal=True, key="ra_nadp")
+                    ra_nadp = st.radio("Is a Noise Abatement Departure Procedure (NADP) required?", ["No","Yes"], horizontal=True, key=f"ra_nadp_{rc}")
                     ra_nadp_types = []
                     if ra_nadp == "Yes":
                         st.caption("Select applicable procedure(s):")
                         _n1, _n2, _n3, _n4 = st.columns(4)
-                        _nadp1  = _n1.checkbox("NADP 1",  key="ra_nadp1")
-                        _nadp2  = _n2.checkbox("NADP 2",  key="ra_nadp2")
-                        _nadpA  = _n3.checkbox("Proc A",  key="ra_nadpA")
-                        _nadpB  = _n4.checkbox("Proc B",  key="ra_nadpB")
+                        _nadp1  = _n1.checkbox("NADP 1",  key=f"ra_nadp1_{rc}")
+                        _nadp2  = _n2.checkbox("NADP 2",  key=f"ra_nadp2_{rc}")
+                        _nadpA  = _n3.checkbox("Proc A",  key=f"ra_nadpA_{rc}")
+                        _nadpB  = _n4.checkbox("Proc B",  key=f"ra_nadpB_{rc}")
                         if _nadp1:  ra_nadp_types.append("NADP 1")
                         if _nadp2:  ra_nadp_types.append("NADP 2")
                         if _nadpA:  ra_nadp_types.append("Proc A")
@@ -1200,18 +1206,18 @@ with st.expander("⚙", expanded=False):
                     ra_free_text = st.text_area(
                         "Additional remarks — not included in risk scoring",
                         placeholder="NOTAM'lar, özel kısıtlamalar, operasyonel notlar...",
-                        height=100, key="ra_free_text"
+                        height=100, key=f"ra_free_text_{rc}"
                     )
 
                     st.markdown("---")
 
                     col_calc, col_reset = st.columns([3, 1])
                     with col_reset:
-                        if st.button("🔄 Sıfırla", use_container_width=True, key="ra_reset"):
+                        if st.button("🔄 Sıfırla", use_container_width=True, key=f"ra_reset_{rc}"):
                             reset_ra_form()
                             st.rerun()
                     with col_calc:
-                        calc_clicked = st.button("🎯  Calculate Risk", use_container_width=True, type="primary", key="ra_calc")
+                        calc_clicked = st.button("🎯  Calculate Risk", use_container_width=True, type="primary", key=f"ra_calc_{rc}")
 
                     if calc_clicked:
                         # Map UI values to engine keys
