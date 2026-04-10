@@ -88,7 +88,7 @@ def find_pilot(pilots, full_name):
 
 
 # ── Email Sender ───────────────────────────────────────────────────────────────
-def send_email(to_email, pilot_name, airports_list, flight_date, ac_type):
+def send_email(to_email, pilot_name, airports_list, flight_date, ac_type, pdf_bytes=None, pdf_filename=None):
     try:
         gmail_cfg = st.secrets.get("gmail", {})
         sender    = gmail_cfg.get("sender", "")
@@ -100,7 +100,9 @@ def send_email(to_email, pilot_name, airports_list, flight_date, ac_type):
         airport_html  = "<br>".join([f"<b>{lbl}</b>: {icao}" for lbl, icao in airports_list])
 
         from email.header import Header
-        msg = MIMEMultipart("alternative")
+        from email.mime.base import MIMEBase
+        from email import encoders
+        msg = MIMEMultipart("mixed")
         msg["Subject"] = Header(f"Flight Briefing - {flight_date}", "utf-8")
         msg["From"]    = sender
         msg["To"]      = to_email
@@ -139,8 +141,17 @@ REC HAVACILIK – Flight Briefing and Awareness Tool
 </p>
 </body></html>
 """
-        msg.attach(MIMEText(text, "plain"))
-        msg.attach(MIMEText(html, "html"))
+        alt_part = MIMEMultipart("alternative")
+        alt_part.attach(MIMEText(text, "plain"))
+        alt_part.attach(MIMEText(html, "html"))
+        msg.attach(alt_part)
+
+        if pdf_bytes and pdf_filename:
+            att = MIMEBase("application", "pdf")
+            att.set_payload(pdf_bytes)
+            encoders.encode_base64(att)
+            att.add_header("Content-Disposition", "attachment", filename=pdf_filename)
+            msg.attach(att)
 
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(sender, password)
@@ -192,8 +203,11 @@ def calc_risk(s):
 
     # Block 2 — Approach
     if not s.get('prec'):            add(2, 'No precision approach available', 'Confirm crew currency on non-precision approach; review technique and minima')
-    if s.get('angle') == 'moderate': add(2, 'Elevated approach angle (3.9°–4.49°)')
-    if s.get('angle') == 'steep':    add(3, 'Steep approach angle (≥ 4.5°)', 'Brief steep approach technique; verify aircraft certification and performance compliance')
+    _angle_rwy = f" — RWY {s['angle_rwy']}" if s.get('angle_rwy') else ""
+    if s.get('angle') == 'slight':         add(1, f'Slightly elevated approach angle (3.0–´3.49´){_angle_rwy}')
+    elif s.get('angle') == 'moderate_low': add(2, f'Non-standard approach angle (3.5–´3.89´){_angle_rwy}', f'Brief non-standard glide path technique{_angle_rwy}; verify stabilised approach criteria')
+    elif s.get('angle') == 'moderate':     add(2, f'Elevated approach angle (3.9–´4.49´){_angle_rwy}')
+    elif s.get('angle') == 'steep':        add(3, f'Steep approach angle (≥4.5´){_angle_rwy}', f'Brief steep approach technique{_angle_rwy}; verify aircraft certification and performance compliance')
     if s.get('high_da'):             add(1, 'Terrain-limited precision minima — DA/DH ≥ 400 ft')
     # GNSS uyarısı — yaklaşma tipiyle etkileşim
     gnss = s.get('gnss_risk', 'no')
@@ -227,9 +241,10 @@ def calc_risk(s):
     if s.get('phys_comp'): add(2, 'Physical runway complexity (slope / displaced threshold / offset LOC)')
 
     # Block 4 — OEI
-    if s.get('oei_sid'):   add(3, 'Special engine-out SID required', 'Complete OEI SID analysis; brief engine failure procedure specific to this departure')
-    if s.get('oei_grad'):  add(2, 'Demanding OEI climb gradient — obstacle clearance critical', 'Review obstacle clearance margins with expected TOW and actual conditions')
-    if s.get('perf_lim'):  add(1, 'Performance-limited departure likely', 'Review WAT/CLG limits; consider derate or weight restriction')
+    _oei_rwy = (" — RWY " + ", ".join(s['oei_rwys'])) if s.get('oei_rwys') else ""
+    if s.get('oei_sid'):   add(3, f'Special engine-out SID required{_oei_rwy}', f'Complete OEI SID analysis; brief engine failure procedure specific to this departure{_oei_rwy}')
+    if s.get('oei_grad'):  add(2, f'Demanding OEI climb gradient — obstacle clearance critical{_oei_rwy}', f'Review obstacle clearance margins with expected TOW and actual conditions{_oei_rwy}')
+    if s.get('perf_lim'):  add(1, f'Performance-limited departure likely{_oei_rwy}', f'Review WAT/CLG limits; consider derate or weight restriction{_oei_rwy}')
 
     # Block 5 — Weather
     if s.get('lvp') == 'sometimes': add(1, 'Occasional LVP / low ceiling conditions')
@@ -258,8 +273,10 @@ def calc_risk(s):
     if s.get('terr_hh'):  add(2, 'Significant terrain / mountain wave / hot-high environment', 'Review terrain awareness procedures; compute performance for hot/high conditions')
 
     # Block 6 — ATC
-    if s.get('atc') == 'moderate':   add(1, 'Moderate ATC / taxi routing complexity')
-    if s.get('atc') == 'significant': add(2, 'Significant ATC / slot / sequencing complexity', 'Allow extra time margins for clearances; pre-brief complex taxi routing')
+    atc_details = s.get('atc_details', [])
+    atc_detail_str = (" — " + "; ".join(atc_details)) if atc_details else ""
+    if s.get('atc') == 'moderate':    add(1, f'Moderate ATC / taxi routing complexity{atc_detail_str}')
+    if s.get('atc') == 'significant': add(2, f'Significant ATC / slot / sequencing complexity{atc_detail_str}', f'Allow extra time margins for clearances; pre-brief complex taxi routing{atc_detail_str}')
     if s.get('mil_traff'): add(2, 'Military / mixed traffic or unusual ATC phraseology', 'Review local ATC procedures and non-standard phraseology before flight')
 
     # Block 6b — GNSS / GPS reliability
@@ -284,6 +301,18 @@ def calc_risk(s):
     if s.get('fuel') == 'uncertain': add(1, 'Fuel / ground handling reliability uncertain', 'Confirm fuel uplift availability minimum 48 h before departure')
     if s.get('fuel') == 'poor':      add(2, 'Poor fuel or ground handling standards', 'Arrange fuel from alternative source; coordinate closely with handler')
     if not s.get('crew_rec'):        add(1, 'No recent crew experience at this aerodrome (< 12 months)', 'Brief aerodrome-specific material; consider simulator or CBT refresher')
+
+    # Block 9 — Curfew
+    if s.get('curfew'):
+        curfew_str = ""
+        if s.get('curfew_open') and s.get('curfew_close'):
+            curfew_str = f" ({s['curfew_open']}–{s['curfew_close']} UTC)"
+        add(1, f'Curfew in effect{curfew_str}', f'Plan arrival/departure within curfew window{curfew_str}; coordinate with OCC')
+
+    # Block 10 — NADP
+    if s.get('nadp'):
+        nadp_str = (" — " + ", ".join(s['nadp_types'])) if s.get('nadp_types') else ""
+        add(1, f'Noise Abatement Departure Procedure required{nadp_str}', f'Brief NADP{nadp_str}; ensure crew familiar with engine thrust reduction profiles')
 
     # Final determination
     unique_drivers = list(dict.fromkeys(filter(None, drivers)))
@@ -420,6 +449,16 @@ def gen_summary_items(s):
     if s.get('fuel') == 'poor':   items.append("Poor fuel / ground handling — alternative sourcing recommended")
     elif s.get('fuel') == 'uncertain': items.append("Fuel availability uncertain — confirm 48 h before departure")
     if not s.get('crew_rec'):      items.append("No recent crew experience — enhanced pre-flight briefing required")
+    if s.get('curfew'):
+        curfew_str = ""
+        if s.get('curfew_open') and s.get('curfew_close'):
+            curfew_str = f" ({s['curfew_open']}–{s['curfew_close']} UTC)"
+        items.append(f"Curfew in effect{curfew_str} — plan arrival/departure within window")
+    if s.get('nadp'):
+        nadp_str = (" — " + ", ".join(s['nadp_types'])) if s.get('nadp_types') else ""
+        items.append(f"NADP required{nadp_str}")
+    if s.get('free_text'):
+        items.append(f"Additional remarks: {s['free_text']}")
     return items
 
 
@@ -628,6 +667,23 @@ def generate_pdf_page(cv, frm, airport, risk, fi, page_label=""):
         tx(f"  ⚠  {czib_text}", ML + 6, y - cz_h + 6, FB, 9, colors.HexColor("#C0392B"))
         y -= cz_h + 3
 
+    # ── Curfew / NADP / Free Text (from fi) ──────────────────────────────────
+    _extra_lines = []
+    if fi.get('curfew'):
+        _cw_str = ""
+        if fi.get('curfew_open') and fi.get('curfew_close'):
+            _cw_str = f" ({fi['curfew_open']}–{fi['curfew_close']} UTC)"
+        _extra_lines.append(f"CURFEW IN EFFECT{_cw_str}")
+    if fi.get('nadp') and fi.get('nadp_types'):
+        _extra_lines.append("NADP REQUIRED: " + ", ".join(fi['nadp_types']))
+    elif fi.get('nadp'):
+        _extra_lines.append("NADP REQUIRED")
+    if fi.get('free_text'):
+        _extra_lines.append(f"REMARKS: {fi['free_text']}")
+    if _extra_lines:
+        y = shdr(y, "OPERATIONAL NOTES")
+        y = tblk(y, "\n".join(_extra_lines)); y -= 3
+
     cert = "I hereby certify that route and aerodrome familiarization was completed for the flight in accordance with AMC1 ORO.FC.105 b(2);c and OM PART C."
     ch = 24; bx(ML, y, W, ch, fill=LIGHT, stroke=BORD)
     lns = wl(cert, FI, 8, W - 16); ty = y - 6
@@ -789,14 +845,14 @@ if st.button("📄  RAQ BOOKLET PDF OLUŞTUR", use_container_width=True, type="p
 
                 pilot_obj = find_pilot(pilots, pic)
                 if pilot_obj:
-                    ok, msg_result = send_email(pilot_obj["email"], pic, valid_airports, date.strftime("%Y-%m-%d"), ac)
+                    ok, msg_result = send_email(pilot_obj["email"], pic, valid_airports, date.strftime("%Y-%m-%d"), ac, pdf_bytes=pdf, pdf_filename=fname)
                     if ok: st.success(f"📧 Mail gönderildi → {pilot_obj['email']}")
                     else:  st.warning(f"⚠ Mail gönderilemedi: {msg_result}")
 
                 if sic:
                     sic_obj = find_pilot(pilots, sic)
                     if sic_obj:
-                        ok, msg_result = send_email(sic_obj["email"], sic, valid_airports, date.strftime("%Y-%m-%d"), ac)
+                        ok, msg_result = send_email(sic_obj["email"], sic, valid_airports, date.strftime("%Y-%m-%d"), ac, pdf_bytes=pdf, pdf_filename=fname)
                         if ok: st.success(f"📧 Mail gönderildi → {sic_obj['email']}")
                         else:  st.warning(f"⚠ SIC maili gönderilemedi: {msg_result}")
 
@@ -808,6 +864,32 @@ st.caption("© Flight Briefing and Awareness Tool  –  AMC1 ORO.FC.105 b(2);c")
 # ══════════════════════════════════════════════════════════════════════════════
 # ADMIN PANEL
 # ══════════════════════════════════════════════════════════════════════════════
+def reset_ra_form():
+    """Risk Assessment formundaki tüm alanları sıfırla."""
+    static_keys = [
+        'ra_result','ra_summary','ra_survey','ra_icao',
+        'rwy_sets','ra_cat','ra_angle','ra_prec','ra_hda',
+        'ra_off','ra_off_rwy','ra_mad','ra_oema','ra_rwyw',
+        'ra_rwym','ra_phc','ra_oisid','ra_oigrad','ra_plim',
+        'ra_lvp','ra_xw','ra_thh','ra_msa_ft','ra_msa_sector',
+        'ra_atc','ra_mil','ra_gnss','ra_pol','ra_sec',
+        'ra_usoap','ra_alt','ra_alt_lvp','ra_fuel','ra_crec',
+        'ra_spd','ra_spc','ra_spa','ra_by',
+        'ra_angle_rwy','ra_angle_rwy_txt',
+        'ra_oei_rwys','ra_oei_rwy_txt',
+        'ra_atc_freq','ra_atc_accent','ra_atc_space','ra_atc_taxi',
+        'ra_curfew','ra_curfew_open','ra_curfew_close',
+        'ra_nadp','ra_nadp1','ra_nadp2','ra_nadpA','ra_nadpB',
+        'ra_free_text',
+    ]
+    for k in static_keys:
+        if k in st.session_state:
+            del st.session_state[k]
+    # Dinamik pist keylerini de temizle
+    rwy_keys = [k for k in st.session_state if k.startswith('rwy_des_') or k.startswith('rwy_apr_')]
+    for k in rwy_keys:
+        del st.session_state[k]
+
 if "admin_authenticated" not in st.session_state:
     st.session_state["admin_authenticated"] = False
 
@@ -864,16 +946,7 @@ with st.expander("⚙", expanded=False):
                 st.session_state["edit_cat"]     = ap_data.get("category", "A")
                 st.session_state["edit_summary"] = loaded_summary
                 # Risk form session state sıfırla — önceki girişler görünmesin
-                for k in ['ra_result','ra_summary','ra_survey','ra_icao',
-                          'rwy_sets','ra_cat','ra_angle','ra_prec','ra_hda',
-                          'ra_off','ra_off_rwy','ra_mad','ra_oema','ra_rwyw',
-                          'ra_rwym','ra_phc','ra_oisid','ra_oigrad','ra_plim',
-                          'ra_lvp','ra_xw','ra_thh','ra_msa_ft','ra_msa_sector',
-                          'ra_atc','ra_mil','ra_gnss','ra_pol','ra_sec',
-                          'ra_usoap','ra_alt','ra_alt_lvp','ra_fuel','ra_crec',
-                          'ra_spd','ra_spc','ra_spa','ra_by']:
-                    if k in st.session_state:
-                        del st.session_state[k]
+                reset_ra_form()
                 if ap_data: st.success(f"✔ {icao_e} yüklendi — {ap_data.get('name','')}")
                 else:       st.info(f"ℹ {icao_e} yeni meydan.")
 
@@ -987,8 +1060,23 @@ with st.expander("⚙", expanded=False):
                     ra_circling_rwy = [r[0] for r in rwy_data if r[1] == "Circling"]
 
                     ra_angle = st.selectbox("Best available approach angle?",
-                                            ["Normal (< 3.9°)","Elevated (3.9°–4.49°)","Steep (≥ 4.5°) — override risk"],
+                                            [
+                                                "Normal (≤ 3.0°)",
+                                                "Slightly elevated (3.0° – 3.49°)",
+                                                "Non-standard (3.5° – 3.89°)",
+                                                "Elevated (3.9° – 4.49°)",
+                                                "Steep (≥ 4.5°) — override risk",
+                                            ],
                                             key="ra_angle")
+                    ra_angle_rwy = ""
+                    if ra_angle != "Normal (≤ 3.0°)" and rwy_names:
+                        ra_angle_rwy = st.selectbox(
+                            "Which runway does this apply to?",
+                            [""] + rwy_names, key="ra_angle_rwy",
+                            help="Non-standard glide path — select the affected runway"
+                        )
+                    elif ra_angle != "Normal (≤ 3.0°)":
+                        ra_angle_rwy = st.text_input("Which runway? (e.g. 09R)", max_chars=4, key="ra_angle_rwy_txt").upper().strip()
                     ra_high_da = st.checkbox("Precision DA/DH ≥ 400 ft due to terrain-limited minima?", key="ra_hda",
                                               disabled=(ra_prec == "No"))
                     c3, c4 = st.columns(2)
@@ -1006,6 +1094,18 @@ with st.expander("⚙", expanded=False):
                     ra_oei_sid  = c7.checkbox("Special OEI SID required?", key="ra_oisid")
                     ra_oei_grad = c8.checkbox("OEI gradient demanding?", key="ra_oigrad")
                     ra_perf_lim = c9.checkbox("Performance-limited departure?", key="ra_plim")
+                    ra_oei_rwys = []
+                    if ra_oei_sid or ra_oei_grad or ra_perf_lim:
+                        if rwy_names:
+                            ra_oei_rwys = st.multiselect(
+                                "Which runway(s) does this apply to?",
+                                rwy_names, key="ra_oei_rwys",
+                                help="Select all departure runways affected by OEI / performance constraints"
+                            )
+                        else:
+                            _oei_rwy_txt = st.text_input("Which runway? (e.g. 09R)", max_chars=4, key="ra_oei_rwy_txt").upper().strip()
+                            if _oei_rwy_txt:
+                                ra_oei_rwys = [_oei_rwy_txt]
 
                     st.markdown('<div class="ra-block"><h4>🌤 Block 5 — Weather & Environment</h4></div>', unsafe_allow_html=True)
                     ra_lvp = st.selectbox("Frequency of LVP / fog / low ceiling?",
@@ -1029,6 +1129,18 @@ with st.expander("⚙", expanded=False):
                     st.markdown('<div class="ra-block"><h4>📡 Block 6 — ATC & Operational Complexity</h4></div>', unsafe_allow_html=True)
                     ra_atc = st.selectbox("ATC / slot / taxi complexity?",
                                           ["Low / normal","Moderate","Significant"], key="ra_atc")
+                    ra_atc_details = []
+                    if ra_atc in ("Moderate", "Significant"):
+                        st.caption("Select all contributing factors:")
+                        _atc_c1, _atc_c2 = st.columns(2)
+                        _atc_freq   = _atc_c1.checkbox("High frequency workload / congested frequency", key="ra_atc_freq")
+                        _atc_accent = _atc_c2.checkbox("Accent / non-standard phraseology issues", key="ra_atc_accent")
+                        _atc_space  = _atc_c1.checkbox("Complex / busy airspace structure", key="ra_atc_space")
+                        _atc_taxi   = _atc_c2.checkbox("Complex taxi routing / hot spots", key="ra_atc_taxi")
+                        if _atc_freq:   ra_atc_details.append("congested frequency")
+                        if _atc_accent: ra_atc_details.append("accent / phraseology")
+                        if _atc_space:  ra_atc_details.append("complex airspace")
+                        if _atc_taxi:   ra_atc_details.append("complex taxi / hot spots")
                     ra_mil_traff = st.checkbox("Military / mixed traffic or unusual ATC phraseology?", key="ra_mil")
 
                     ra_gnss = st.selectbox(
@@ -1059,11 +1171,57 @@ with st.expander("⚙", expanded=False):
                     ra_crew_rec = st.radio("Crew has operated at this aerodrome within the last 12 months?",
                                            ["Yes","No"], horizontal=True, key="ra_crec")
 
+                    st.markdown('<div class="ra-block"><h4>🕐 Block 9 — Curfew</h4></div>', unsafe_allow_html=True)
+                    ra_curfew = st.radio("Is there a curfew at this aerodrome?", ["No","Yes"], horizontal=True, key="ra_curfew")
+                    ra_curfew_open  = ""
+                    ra_curfew_close = ""
+                    if ra_curfew == "Yes":
+                        _cc1, _ccc, _cc2 = st.columns([2, 1, 2])
+                        ra_curfew_open  = _cc1.text_input("Opening time (UTC)", placeholder="0600", max_chars=4, key="ra_curfew_open").strip()
+                        _ccc.markdown("<br><div style='text-align:center;font-size:20px;padding-top:6px'>→</div>", unsafe_allow_html=True)
+                        ra_curfew_close = _cc2.text_input("Closing time (UTC)", placeholder="2300", max_chars=4, key="ra_curfew_close").strip()
+
+                    st.markdown('<div class="ra-block"><h4>📢 Block 10 — NADP (Noise Abatement)</h4></div>', unsafe_allow_html=True)
+                    ra_nadp = st.radio("Is a Noise Abatement Departure Procedure (NADP) required?", ["No","Yes"], horizontal=True, key="ra_nadp")
+                    ra_nadp_types = []
+                    if ra_nadp == "Yes":
+                        st.caption("Select applicable procedure(s):")
+                        _n1, _n2, _n3, _n4 = st.columns(4)
+                        _nadp1  = _n1.checkbox("NADP 1",  key="ra_nadp1")
+                        _nadp2  = _n2.checkbox("NADP 2",  key="ra_nadp2")
+                        _nadpA  = _n3.checkbox("Proc A",  key="ra_nadpA")
+                        _nadpB  = _n4.checkbox("Proc B",  key="ra_nadpB")
+                        if _nadp1:  ra_nadp_types.append("NADP 1")
+                        if _nadp2:  ra_nadp_types.append("NADP 2")
+                        if _nadpA:  ra_nadp_types.append("Proc A")
+                        if _nadpB:  ra_nadp_types.append("Proc B")
+
+                    st.markdown('<div class="ra-block"><h4>📝 Additional Notes (Free Text)</h4></div>', unsafe_allow_html=True)
+                    ra_free_text = st.text_area(
+                        "Additional remarks — not included in risk scoring",
+                        placeholder="NOTAM'lar, özel kısıtlamalar, operasyonel notlar...",
+                        height=100, key="ra_free_text"
+                    )
+
                     st.markdown("---")
 
-                    if st.button("🎯  Calculate Risk", use_container_width=True, type="primary", key="ra_calc"):
+                    col_calc, col_reset = st.columns([3, 1])
+                    with col_reset:
+                        if st.button("🔄 Sıfırla", use_container_width=True, key="ra_reset"):
+                            reset_ra_form()
+                            st.rerun()
+                    with col_calc:
+                        calc_clicked = st.button("🎯  Calculate Risk", use_container_width=True, type="primary", key="ra_calc")
+
+                    if calc_clicked:
                         # Map UI values to engine keys
-                        angle_map = {"Normal (< 3.9°)": "normal", "Elevated (3.9°–4.49°)": "moderate", "Steep (≥ 4.5°) — override risk": "steep"}
+                        angle_map = {
+                            "Normal (≤ 3.0°)": "normal",
+                            "Slightly elevated (3.0° – 3.49°)": "slight",
+                            "Non-standard (3.5° – 3.89°)": "moderate_low",
+                            "Elevated (3.9° – 4.49°)": "moderate",
+                            "Steep (≥ 4.5°) — override risk": "steep",
+                        }
                         rwy_map   = {"≥ 45 m": "wide", "30–44 m": "medium", "< 30 m": "narrow"}
                         lvp_map   = {"Rarely / not significant": "no", "Occasional": "sometimes", "Frequent": "frequent"}
                         atc_map   = {"Low / normal": "no", "Moderate": "moderate", "Significant": "significant"}
@@ -1085,6 +1243,7 @@ with st.expander("⚙", expanded=False):
                             'circling':    ra_circling,
                             'circling_rwys': ra_circling_rwy,
                             'angle':       angle_map[ra_angle],
+                            'angle_rwy':   ra_angle_rwy if ra_angle != "Normal (≤ 3.0°)" else "",
                             'high_da':     ra_high_da if ra_prec == "Yes" else False,
                             'offset':      ra_offset,
                             'madem':       ra_madem,
@@ -1095,12 +1254,14 @@ with st.expander("⚙", expanded=False):
                             'oei_sid':     ra_oei_sid,
                             'oei_grad':    ra_oei_grad,
                             'perf_lim':    ra_perf_lim,
+                            'oei_rwys':    ra_oei_rwys,
                             'lvp':         lvp_map[ra_lvp],
                             'xw_risk':     ra_xw_risk,
                             'terr_hh':     ra_terr_hh,
                             'msa_ft':      ra_msa_ft,
                             'msa_sector':  ra_msa_sector,
                             'atc':         atc_map[ra_atc],
+                            'atc_details': ra_atc_details,
                             'mil_traff':   ra_mil_traff,
                             'gnss_risk':   {"No known risk": "no", "NOTAM'd / interference expected": "notam", "Active jamming / spoofing reported": "active"}[ra_gnss],
                             'pol_risk':    pol_map[ra_pol_risk],
@@ -1109,6 +1270,12 @@ with st.expander("⚙", expanded=False):
                             'alt':         alt_map[ra_alt],
                             'fuel':        fuel_map[ra_fuel],
                             'crew_rec':    ra_crew_rec == "Yes",
+                            'curfew':      ra_curfew == "Yes",
+                            'curfew_open': ra_curfew_open,
+                            'curfew_close':ra_curfew_close,
+                            'nadp':        ra_nadp == "Yes",
+                            'nadp_types':  ra_nadp_types,
+                            'free_text':   ra_free_text.strip(),
                         }
 
                         result  = calc_risk(survey)
@@ -1172,8 +1339,7 @@ with st.expander("⚙", expanded=False):
                             })
                             if ok:
                                 st.session_state["save_ok_msg"] = f"✔ {icao_e} risk değerlendirmesi kaydedildi! Yeniden değerlendirme: {due_str}"
-                                for k in ['ra_result','ra_summary','ra_survey','ra_icao']:
-                                    if k in st.session_state: del st.session_state[k]
+                                reset_ra_form()
                                 st.rerun()
                             else:
                                 st.error("Kayıt başarısız.")
